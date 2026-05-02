@@ -79,6 +79,35 @@
             <CheckBox
                 Content="종신 지급형 연금 수령 의향 (체크 시 추천 후보가 삼성생명보험 직접 운용 상품으로 제한됩니다)"
                 IsChecked="{x:Bind ViewModel.WantsLifelongAnnuity, Mode=TwoWay}" />
+
+            <Grid ColumnSpacing="16" RowSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="월 추가 납입" VerticalAlignment="Center" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                <NumberBox
+                    Grid.Column="1"
+                    Width="180"
+                    Value="{x:Bind ViewModel.MonthlyContribution, Mode=TwoWay}"
+                    SpinButtonPlacementMode="Hidden"
+                    AcceptsExpression="False"
+                    Minimum="0" />
+                <TextBlock Grid.Column="2" Text="₩ — 0이면 추가 납입 없음 (현 잔고만 운용), 양수면 매월 적립식 자동이체 가정"
+                           VerticalAlignment="Center" TextWrapping="Wrap"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            </Grid>
+
+            <StackPanel Spacing="4">
+                <TextBlock Text="다른 노후 자산 / 기타 참고사항 (선택)" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                <TextBox
+                    Text="{x:Bind ViewModel.OtherRetirementAssets, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                    AcceptsReturn="True"
+                    TextWrapping="Wrap"
+                    Height="68"
+                    PlaceholderText="예: 국민연금 가입 중, 주택 1채 보유, 별도 연금저축 운용 중, 배우자 별도 IRP 등 — 없으면 비워두세요" />
+            </StackPanel>
         </StackPanel>
 
         <!-- 계좌 합계 -->

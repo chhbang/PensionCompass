@@ -101,6 +101,33 @@ public sealed partial class MyAccountViewModel : ObservableObject
         }
     }
 
+    public double MonthlyContribution
+    {
+        get => Account.MonthlyContribution.HasValue ? (double)Account.MonthlyContribution.Value : 0d;
+        set
+        {
+            // Treat NaN as 0 (cleared field) so the "no contribution" case is the natural default.
+            decimal? next = double.IsNaN(value) || value <= 0 ? null : (decimal?)value;
+            if (Account.MonthlyContribution == next) return;
+            Account.MonthlyContribution = next;
+            OnPropertyChanged();
+            AppState.Instance.SaveAccount();
+        }
+    }
+
+    public string OtherRetirementAssets
+    {
+        get => Account.OtherRetirementAssets;
+        set
+        {
+            var clean = value ?? string.Empty;
+            if (Account.OtherRetirementAssets == clean) return;
+            Account.OtherRetirementAssets = clean;
+            OnPropertyChanged();
+            AppState.Instance.SaveAccount();
+        }
+    }
+
     /// <summary>
     /// Product names from the imported catalog (both principal-guaranteed and funds),
     /// used as the suggestion pool for the AutoSuggestBox.
@@ -155,6 +182,8 @@ public sealed partial class MyAccountViewModel : ObservableObject
         OnPropertyChanged(nameof(CurrentAge));
         OnPropertyChanged(nameof(DesiredAnnuityStartAge));
         OnPropertyChanged(nameof(WantsLifelongAnnuity));
+        OnPropertyChanged(nameof(MonthlyContribution));
+        OnPropertyChanged(nameof(OtherRetirementAssets));
     }
 
     private void OwnedItems_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)

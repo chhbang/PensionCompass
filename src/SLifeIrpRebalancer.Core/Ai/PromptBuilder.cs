@@ -43,7 +43,9 @@ public static class PromptBuilder
     {
         var hasAge = account.CurrentAge.HasValue;
         var hasStartAge = account.DesiredAnnuityStartAge.HasValue;
-        if (!hasAge && !hasStartAge && !account.WantsLifelongAnnuity) return;
+        var hasContribution = account.MonthlyContribution is > 0m;
+        var hasOtherAssets = !string.IsNullOrWhiteSpace(account.OtherRetirementAssets);
+        if (!hasAge && !hasStartAge && !account.WantsLifelongAnnuity && !hasContribution && !hasOtherAssets) return;
 
         sb.AppendLine("## 가입자 정보 / 희망사항");
         if (hasAge)
@@ -61,7 +63,18 @@ public static class PromptBuilder
             }
         }
         sb.AppendLine($"- 종신 지급형 연금 수령 의향: {(account.WantsLifelongAnnuity ? "예 — 아래 운용사 제약 섹션의 hard constraint를 반드시 따라야 합니다" : "아니오 (또는 미정)")}");
-        sb.AppendLine("- 위 정보는 시간 지평(time horizon)과 위험 허용도 결정에 사용해주세요. 개시까지 남은 기간이 길수록 변동성을 감내할 여력이 크고, 짧을수록 원리금보장형 비중을 늘리는 방향이 합리적입니다.");
+        sb.AppendLine($"- 추가 납입 계획: {(hasContribution ? $"매월 {Won(account.MonthlyContribution!.Value)} 적립식 자동이체 (DCA 효과 — 향후 신규 자금이 꾸준히 유입되므로 현 잔고 배분을 약간 더 성장 자산 쪽으로 기울일 여력이 있습니다)" : "없음 — 현 잔고만으로 운용합니다")}");
+        if (hasOtherAssets)
+        {
+            sb.AppendLine("- 다른 노후 자산 / 기타 참고사항:");
+            foreach (var line in account.OtherRetirementAssets.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var trimmed = line.TrimEnd('\r').Trim();
+                if (trimmed.Length == 0) continue;
+                sb.AppendLine($"  - {trimmed}");
+            }
+        }
+        sb.AppendLine("- 위 정보는 시간 지평(time horizon)과 자산 집중도를 판단하는 데 사용해주세요. 단, 사용자의 현재 보유 자산 구성이나 (있다면) 과거 위험 성향이 \"공격형\"이라는 것이 곧 공격적 추천의 근거가 되어서는 안 됩니다 — 현재 거시·시장 환경에서 공격적 진입이 위험해 보이면 사용자가 듣고 싶은 답이 아니더라도 보수적 진입 또는 분할 매수 / 관망을 명확히 권고해주세요.");
         sb.AppendLine();
     }
 

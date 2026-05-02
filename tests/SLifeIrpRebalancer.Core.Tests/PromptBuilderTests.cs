@@ -120,16 +120,69 @@ public class PromptBuilderTests
     [Fact]
     public void Build_NoSubscriberInfo_OmitsSection()
     {
-        // No ages set, lifelong-annuity off → the section adds no signal, so it's skipped entirely
-        // rather than rendering empty bullets.
+        // No ages set, lifelong-annuity off, no contribution, no other assets → skip the section entirely.
         var account = SampleAccount();
         account.CurrentAge = null;
         account.DesiredAnnuityStartAge = null;
         account.WantsLifelongAnnuity = false;
+        account.MonthlyContribution = null;
+        account.OtherRetirementAssets = "";
 
         var output = PromptBuilder.Build(new PromptInput(null, account, ""));
 
         Assert.DoesNotContain("## 가입자 정보", output.UserPrompt);
+    }
+
+    [Fact]
+    public void Build_MonthlyContribution_RendersAmountAndDcaNote()
+    {
+        var account = SampleAccount();
+        account.MonthlyContribution = 500_000m;
+
+        var output = PromptBuilder.Build(new PromptInput(null, account, ""));
+
+        Assert.Contains("매월 ₩500,000 적립식", output.UserPrompt);
+        Assert.Contains("DCA", output.UserPrompt);
+    }
+
+    [Fact]
+    public void Build_NoMonthlyContribution_StatesNoneExplicitly()
+    {
+        var account = SampleAccount();
+        account.CurrentAge = 45; // ensure section renders
+        account.MonthlyContribution = null;
+
+        var output = PromptBuilder.Build(new PromptInput(null, account, ""));
+
+        Assert.Contains("추가 납입 계획: 없음", output.UserPrompt);
+    }
+
+    [Fact]
+    public void Build_OtherRetirementAssets_RendersAsBulletedSubItems()
+    {
+        var account = SampleAccount();
+        account.OtherRetirementAssets = "국민연금 가입 중\n주택 1채 보유\n";
+
+        var output = PromptBuilder.Build(new PromptInput(null, account, ""));
+
+        Assert.Contains("다른 노후 자산", output.UserPrompt);
+        Assert.Contains("  - 국민연금 가입 중", output.UserPrompt);
+        Assert.Contains("  - 주택 1채 보유", output.UserPrompt);
+    }
+
+    [Fact]
+    public void Build_SubscriberInfo_IncludesMacroOverPreferenceGuidance()
+    {
+        // The user has explicitly rejected risk-tolerance inputs because they want AI to weigh macro
+        // conditions, not mirror the user's stated preference. The prompt must spell that bias out so
+        // the AI doesn't anchor on a holdings-implied "공격형" profile when conditions don't warrant it.
+        var account = SampleAccount();
+        account.CurrentAge = 45;
+
+        var output = PromptBuilder.Build(new PromptInput(null, account, ""));
+
+        Assert.Contains("거시·시장 환경", output.UserPrompt);
+        Assert.Contains("듣고 싶은 답이 아니더라도", output.UserPrompt);
     }
 
     [Fact]

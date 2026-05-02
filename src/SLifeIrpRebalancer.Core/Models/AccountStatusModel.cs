@@ -27,5 +27,20 @@ public sealed class AccountStatusModel
     /// </summary>
     public bool WantsLifelongAnnuity { get; set; }
 
+    /// <summary>
+    /// Planned monthly DCA contribution into this IRP (₩). Null or 0 means "no ongoing contributions —
+    /// rebalance the existing balance only". A positive value tells the AI it can plan with future
+    /// dollar-cost-averaging in mind, e.g. tilt the current allocation slightly more toward growth assets
+    /// since incoming contributions provide natural averaging.
+    /// </summary>
+    public decimal? MonthlyContribution { get; set; }
+
+    /// <summary>
+    /// Free-form description of the user's other retirement assets (NPS, housing, separate 연금저축 etc.).
+    /// Lets the AI judge how concentrated this IRP is in the user's overall retirement picture.
+    /// Empty string when the user has nothing to add.
+    /// </summary>
+    public string OtherRetirementAssets { get; set; } = string.Empty;
+
     public List<OwnedProductModel> OwnedItems { get; set; } = [];
 }
