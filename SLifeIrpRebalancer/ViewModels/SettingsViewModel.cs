@@ -82,14 +82,4 @@ public sealed partial class SettingsViewModel : ObservableObject
         }
     }
 
-    public bool RestrictToSamsungLifeForLifelongAnnuity
-    {
-        get => Settings.RestrictToSamsungLifeForLifelongAnnuity;
-        set
-        {
-            if (Settings.RestrictToSamsungLifeForLifelongAnnuity == value) return;
-            Settings.RestrictToSamsungLifeForLifelongAnnuity = value;
-            OnPropertyChanged();
-        }
-    }
 }

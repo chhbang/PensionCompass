@@ -44,7 +44,7 @@ public class PromptBuilderTests
     [Fact]
     public void Build_AlwaysProducesKoreanSystemPrompt()
     {
-        var output = PromptBuilder.Build(new PromptInput(null, new AccountStatusModel(), false, ""));
+        var output = PromptBuilder.Build(new PromptInput(null, new AccountStatusModel(), ""));
 
         Assert.Contains("IRP", output.SystemPrompt);
         Assert.Contains("한국어", output.SystemPrompt);
@@ -57,7 +57,7 @@ public class PromptBuilderTests
         account.RebalanceTiming = RebalanceTiming.Immediate;
         account.ExecutionDate = null;
 
-        var output = PromptBuilder.Build(new PromptInput(null, account, false, ""));
+        var output = PromptBuilder.Build(new PromptInput(null, account, ""));
 
         Assert.Contains("최대한 즉시", output.UserPrompt);
         Assert.DoesNotContain("실행 예정일", output.UserPrompt);
@@ -70,7 +70,7 @@ public class PromptBuilderTests
         account.RebalanceTiming = RebalanceTiming.MaturityReservation;
         account.ExecutionDate = new DateOnly(2027, 9, 20);
 
-        var output = PromptBuilder.Build(new PromptInput(null, account, false, ""));
+        var output = PromptBuilder.Build(new PromptInput(null, account, ""));
 
         Assert.Contains("만기 예약용", output.UserPrompt);
         Assert.Contains("2027년 9월 20일", output.UserPrompt);
@@ -79,7 +79,9 @@ public class PromptBuilderTests
     [Fact]
     public void Build_LifelongAnnuity_IncludesStrictManagerConstraint()
     {
-        var output = PromptBuilder.Build(new PromptInput(null, SampleAccount(), RestrictToSamsungLifeForLifelongAnnuity: true, ""));
+        var account = SampleAccount();
+        account.WantsLifelongAnnuity = true;
+        var output = PromptBuilder.Build(new PromptInput(null, account, ""));
 
         Assert.Contains("운용사 제약", output.UserPrompt);
         Assert.Contains("삼성생명보험주식회사", output.UserPrompt);
@@ -91,15 +93,49 @@ public class PromptBuilderTests
     [Fact]
     public void Build_NoLifelongAnnuity_OmitsManagerConstraint()
     {
-        var output = PromptBuilder.Build(new PromptInput(null, SampleAccount(), RestrictToSamsungLifeForLifelongAnnuity: false, ""));
+        var account = SampleAccount();
+        account.WantsLifelongAnnuity = false;
+        var output = PromptBuilder.Build(new PromptInput(null, account, ""));
 
         Assert.DoesNotContain("운용사 제약", output.UserPrompt);
     }
 
     [Fact]
+    public void Build_SubscriberInfo_RendersAgesAndComputesYearsToStart()
+    {
+        var account = SampleAccount();
+        account.CurrentAge = 45;
+        account.DesiredAnnuityStartAge = 60;
+        account.WantsLifelongAnnuity = true;
+
+        var output = PromptBuilder.Build(new PromptInput(null, account, ""));
+
+        Assert.Contains("## 가입자 정보 / 희망사항", output.UserPrompt);
+        Assert.Contains("만 45세", output.UserPrompt);
+        Assert.Contains("만 60세", output.UserPrompt);
+        Assert.Contains("약 15년 후", output.UserPrompt);
+        Assert.Contains("종신 지급형 연금 수령 의향: 예", output.UserPrompt);
+    }
+
+    [Fact]
+    public void Build_NoSubscriberInfo_OmitsSection()
+    {
+        // No ages set, lifelong-annuity off → the section adds no signal, so it's skipped entirely
+        // rather than rendering empty bullets.
+        var account = SampleAccount();
+        account.CurrentAge = null;
+        account.DesiredAnnuityStartAge = null;
+        account.WantsLifelongAnnuity = false;
+
+        var output = PromptBuilder.Build(new PromptInput(null, account, ""));
+
+        Assert.DoesNotContain("## 가입자 정보", output.UserPrompt);
+    }
+
+    [Fact]
     public void Build_HoldingsTable_DistinguishesSellableFromLocked()
     {
-        var output = PromptBuilder.Build(new PromptInput(null, SampleAccount(), false, ""));
+        var output = PromptBuilder.Build(new PromptInput(null, SampleAccount(), ""));
 
         // The 이율보증형 row was IsSellable=false, the bond fund row was IsSellable=true.
         Assert.Contains("매도 금지", output.UserPrompt);
@@ -112,7 +148,7 @@ public class PromptBuilderTests
     [Fact]
     public void Build_Catalog_RendersBothPrincipalGuaranteedAndFundsTables()
     {
-        var output = PromptBuilder.Build(new PromptInput(SampleCatalog(), SampleAccount(), false, ""));
+        var output = PromptBuilder.Build(new PromptInput(SampleCatalog(), SampleAccount(), ""));
 
         Assert.Contains("### 원리금보장형", output.UserPrompt);
         Assert.Contains("### 펀드", output.UserPrompt);
@@ -123,7 +159,7 @@ public class PromptBuilderTests
     [Fact]
     public void Build_NullCatalog_NotesItIsMissing()
     {
-        var output = PromptBuilder.Build(new PromptInput(null, SampleAccount(), false, ""));
+        var output = PromptBuilder.Build(new PromptInput(null, SampleAccount(), ""));
 
         Assert.Contains("상품 카탈로그가 입력되지 않았습니다", output.UserPrompt);
     }
@@ -132,7 +168,7 @@ public class PromptBuilderTests
     public void Build_UserAddendum_AppearsVerbatim()
     {
         var query = "이란 전쟁 상황을 반영해주세요.";
-        var output = PromptBuilder.Build(new PromptInput(null, SampleAccount(), false, query));
+        var output = PromptBuilder.Build(new PromptInput(null, SampleAccount(), query));
 
         Assert.Contains(query, output.UserPrompt);
     }
@@ -140,7 +176,7 @@ public class PromptBuilderTests
     [Fact]
     public void Build_EmptyAddendum_RendersAsNone()
     {
-        var output = PromptBuilder.Build(new PromptInput(null, SampleAccount(), false, ""));
+        var output = PromptBuilder.Build(new PromptInput(null, SampleAccount(), ""));
 
         Assert.Contains("## 사용자 추가 요구사항", output.UserPrompt);
         Assert.Contains("(없음)", output.UserPrompt);

@@ -29,6 +29,21 @@ public sealed partial class AppState : ObservableObject
 
         if (_store.LoadCatalog() is { } persistedCatalog)
             _catalog = persistedCatalog; // backing field directly to avoid re-saving during load
+
+        MigrateLifelongAnnuityFromSettings();
+    }
+
+    /// <summary>
+    /// Earlier builds stored the lifelong-annuity preference in LocalSettings; it's now part of
+    /// <see cref="AccountStatusModel.WantsLifelongAnnuity"/> (subscriber info, not app config).
+    /// Migrate the legacy value once on the first launch after upgrade, then drop the LocalSettings entry.
+    /// </summary>
+    private void MigrateLifelongAnnuityFromSettings()
+    {
+        if (Settings.ReadLegacyLifelongAnnuityFlag() is not { } legacy) return;
+        Account.WantsLifelongAnnuity = legacy;
+        _store.SaveAccount(Account);
+        Settings.ClearLegacyLifelongAnnuityFlag();
     }
 
     /// <summary>Persists current Account snapshot. Call after any field/list mutation in MyAccount or SellTargets VMs.</summary>

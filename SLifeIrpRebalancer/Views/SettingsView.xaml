@@ -111,9 +111,6 @@
                     TextWrapping="Wrap" />
             </StackPanel>
 
-            <CheckBox
-                Content="연금 개시 시 종신형 수령 예정 (삼성생명 운용사 상품으로 제한)"
-                IsChecked="{x:Bind ViewModel.RestrictToSamsungLifeForLifelongAnnuity, Mode=TwoWay}" />
         </StackPanel>
     </ScrollViewer>
 </Page>

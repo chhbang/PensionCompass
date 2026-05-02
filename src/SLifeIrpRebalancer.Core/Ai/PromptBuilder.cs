@@ -7,7 +7,6 @@ namespace SLifeIrpRebalancer.Core.Ai;
 public sealed record PromptInput(
     ProductCatalog? Catalog,
     AccountStatusModel Account,
-    bool RestrictToSamsungLifeForLifelongAnnuity,
     string UserAdditionalQuery);
 
 public sealed record PromptOutput(string SystemPrompt, string UserPrompt);
@@ -30,13 +29,40 @@ public static class PromptBuilder
     {
         var sb = new StringBuilder();
         AppendTiming(sb, input.Account);
-        AppendManagerConstraintIfNeeded(sb, input.RestrictToSamsungLifeForLifelongAnnuity);
+        AppendSubscriberInfo(sb, input.Account);
+        AppendManagerConstraintIfNeeded(sb, input.Account.WantsLifelongAnnuity);
         AppendAccountSummary(sb, input.Account);
         AppendHoldings(sb, input.Account.OwnedItems);
         AppendCatalog(sb, input.Catalog);
         AppendUserAddendum(sb, input.UserAdditionalQuery);
         AppendInstructions(sb);
         return new PromptOutput(SystemPromptText, sb.ToString().TrimEnd());
+    }
+
+    private static void AppendSubscriberInfo(StringBuilder sb, AccountStatusModel account)
+    {
+        var hasAge = account.CurrentAge.HasValue;
+        var hasStartAge = account.DesiredAnnuityStartAge.HasValue;
+        if (!hasAge && !hasStartAge && !account.WantsLifelongAnnuity) return;
+
+        sb.AppendLine("## 가입자 정보 / 희망사항");
+        if (hasAge)
+            sb.AppendLine($"- 현재 나이: 만 {account.CurrentAge}세");
+        if (hasStartAge)
+        {
+            if (hasAge)
+            {
+                var yearsToStart = account.DesiredAnnuityStartAge!.Value - account.CurrentAge!.Value;
+                sb.AppendLine($"- 연금 개시 희망 연령: 만 {account.DesiredAnnuityStartAge}세 (현 시점부터 약 {yearsToStart}년 후)");
+            }
+            else
+            {
+                sb.AppendLine($"- 연금 개시 희망 연령: 만 {account.DesiredAnnuityStartAge}세");
+            }
+        }
+        sb.AppendLine($"- 종신 지급형 연금 수령 의향: {(account.WantsLifelongAnnuity ? "예 — 아래 운용사 제약 섹션의 hard constraint를 반드시 따라야 합니다" : "아니오 (또는 미정)")}");
+        sb.AppendLine("- 위 정보는 시간 지평(time horizon)과 위험 허용도 결정에 사용해주세요. 개시까지 남은 기간이 길수록 변동성을 감내할 여력이 크고, 짧을수록 원리금보장형 비중을 늘리는 방향이 합리적입니다.");
+        sb.AppendLine();
     }
 
     private static void AppendTiming(StringBuilder sb, AccountStatusModel account)

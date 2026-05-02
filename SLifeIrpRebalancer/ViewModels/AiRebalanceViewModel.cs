@@ -41,14 +41,10 @@ public sealed partial class AiRebalanceViewModel : ObservableObject
     /// execution date by emitting placeholder lines, and the preview should reflect that exact output.
     /// </summary>
     public PromptOutput BuildPromptPreview()
-    {
-        var settings = AppState.Instance.Settings;
-        return PromptBuilder.Build(new PromptInput(
+        => PromptBuilder.Build(new PromptInput(
             AppState.Instance.Catalog,
             AppState.Instance.Account,
-            settings.RestrictToSamsungLifeForLifelongAnnuity,
             UserQuery));
-    }
 
     public async Task GenerateProposalAsync(CancellationToken cancellationToken = default)
     {
@@ -83,7 +79,6 @@ public sealed partial class AiRebalanceViewModel : ObservableObject
             var prompt = PromptBuilder.Build(new PromptInput(
                 AppState.Instance.Catalog,
                 account,
-                settings.RestrictToSamsungLifeForLifelongAnnuity,
                 UserQuery));
 
             var client = AiClientFactory.Create(settings.AiProvider, apiKey, settings.GetActiveModel());

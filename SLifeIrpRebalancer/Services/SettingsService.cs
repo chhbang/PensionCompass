@@ -8,7 +8,8 @@ namespace SLifeIrpRebalancer.Services;
 /// - AI provider choice ("Claude" / "Gemini" / "GPT")
 /// - per-provider model id and API key (each provider has its own credentials)
 /// - reasoning effort (Off / Low / Medium / High)
-/// - lifelong-annuity flag
+/// Subscriber info (age, annuity-start age, lifelong-annuity preference) lives on
+/// <see cref="Core.Models.AccountStatusModel"/>, not here — see <see cref="AppState"/>'s migration.
 /// Backing store is per-user packaged-app LocalSettings. API keys are stored in plain text —
 /// adequate for a single-user personal app, but if multi-user / shared-machine scenarios become
 /// relevant, migrate to <c>Windows.Security.Credentials.PasswordVault</c> for OS-level encryption.
@@ -20,7 +21,7 @@ public sealed class SettingsService
     private const string ClaudeApiKeyKey = "ClaudeApiKey";
     private const string GeminiApiKeyKey = "GeminiApiKey";
     private const string GptApiKeyKey = "GptApiKey";
-    private const string RestrictToSamsungLifeKey = "RestrictToSamsungLifeForLifelongAnnuity";
+    private const string LegacyRestrictToSamsungLifeKey = "RestrictToSamsungLifeForLifelongAnnuity"; // moved to AccountStatusModel.WantsLifelongAnnuity
     private const string ClaudeModelKey = "ClaudeModel";
     private const string GeminiModelKey = "GeminiModel";
     private const string GptModelKey = "GptModel";
@@ -57,11 +58,17 @@ public sealed class SettingsService
         set => _store.Values[GptApiKeyKey] = value;
     }
 
-    public bool RestrictToSamsungLifeForLifelongAnnuity
-    {
-        get => _store.Values[RestrictToSamsungLifeKey] is bool b && b;
-        set => _store.Values[RestrictToSamsungLifeKey] = value;
-    }
+    /// <summary>
+    /// One-shot accessor for AppState's migration of the lifelong-annuity flag from LocalSettings
+    /// to <see cref="Core.Models.AccountStatusModel.WantsLifelongAnnuity"/>. Returns null if the
+    /// legacy slot was never set; otherwise returns the stored bool. Always pair with
+    /// <see cref="ClearLegacyLifelongAnnuityFlag"/> after a successful copy into the account.
+    /// </summary>
+    public bool? ReadLegacyLifelongAnnuityFlag()
+        => _store.Values[LegacyRestrictToSamsungLifeKey] is bool b ? b : null;
+
+    public void ClearLegacyLifelongAnnuityFlag()
+        => _store.Values.Remove(LegacyRestrictToSamsungLifeKey);
 
     public string ClaudeModel
     {

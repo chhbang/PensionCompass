@@ -63,6 +63,44 @@ public sealed partial class MyAccountViewModel : ObservableObject
         }
     }
 
+    public double CurrentAge
+    {
+        get => Account.CurrentAge.HasValue ? Account.CurrentAge.Value : double.NaN;
+        set
+        {
+            int? next = double.IsNaN(value) ? null : (int?)value;
+            if (Account.CurrentAge == next) return;
+            Account.CurrentAge = next;
+            OnPropertyChanged();
+            AppState.Instance.SaveAccount();
+        }
+    }
+
+    public double DesiredAnnuityStartAge
+    {
+        get => Account.DesiredAnnuityStartAge.HasValue ? Account.DesiredAnnuityStartAge.Value : double.NaN;
+        set
+        {
+            int? next = double.IsNaN(value) ? null : (int?)value;
+            if (Account.DesiredAnnuityStartAge == next) return;
+            Account.DesiredAnnuityStartAge = next;
+            OnPropertyChanged();
+            AppState.Instance.SaveAccount();
+        }
+    }
+
+    public bool WantsLifelongAnnuity
+    {
+        get => Account.WantsLifelongAnnuity;
+        set
+        {
+            if (Account.WantsLifelongAnnuity == value) return;
+            Account.WantsLifelongAnnuity = value;
+            OnPropertyChanged();
+            AppState.Instance.SaveAccount();
+        }
+    }
+
     /// <summary>
     /// Product names from the imported catalog (both principal-guaranteed and funds),
     /// used as the suggestion pool for the AutoSuggestBox.
@@ -114,6 +152,9 @@ public sealed partial class MyAccountViewModel : ObservableObject
         OnPropertyChanged(nameof(TotalAmount));
         OnPropertyChanged(nameof(DepositAmount));
         OnPropertyChanged(nameof(ProfitAmount));
+        OnPropertyChanged(nameof(CurrentAge));
+        OnPropertyChanged(nameof(DesiredAnnuityStartAge));
+        OnPropertyChanged(nameof(WantsLifelongAnnuity));
     }
 
     private void OwnedItems_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
