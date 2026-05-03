@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "PensionCompass (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "PensionCompass (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}
