@@ -427,3 +427,14 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+# --- 연금나침반 배포 관련 (defense-in-depth) ---
+# *.pfx (line 269), AppPackages/ (line 248)는 이미 위에서 제외됨.
+# 아래는 다른 도구로 인증서를 만들 경우 실수로 커밋되지 않도록 추가:
+*.snk
+*.pem
+*.key
+*.p12
+# .appinstaller XML은 자동 업데이트 호스팅용 — 게시 URL이 들어가니 의도적으로
+# 커밋할 때만 -f로 명시적 추가하도록 차단:
+*.appinstaller

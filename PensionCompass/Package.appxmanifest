@@ -10,7 +10,7 @@
 
   <Identity
     Name="d1c229a3-e254-4f34-ad52-a100941932c4"
-    Publisher="CN=turtulee"
+    Publisher="CN=Changhwan Bang"
     Version="1.0.0.0" />
 
   <mp:PhoneIdentity PhoneProductId="d1c229a3-e254-4f34-ad52-a100941932c4" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
