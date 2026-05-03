@@ -26,6 +26,12 @@ public sealed partial class AiRebalanceViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(CanExportPdf))]
     private bool _isBusy;
 
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasExportedPdf))]
+    private string _lastExportedPdfPath = string.Empty;
+
+    public bool HasExportedPdf => !string.IsNullOrEmpty(LastExportedPdfPath);
+
     /// <summary>Provider+model used for the current response, captured at request time so the PDF metadata stays accurate.</summary>
     private string _lastProviderName = string.Empty;
     private string _lastModelId = string.Empty;
@@ -74,6 +80,9 @@ public sealed partial class AiRebalanceViewModel : ObservableObject
 
         IsBusy = true;
         AiResponse = string.Empty;
+        // The previous PDF is from a different response — drop the convenience link so the user
+        // doesn't accidentally open a stale file thinking it matches the new proposal.
+        LastExportedPdfPath = string.Empty;
         try
         {
             var prompt = PromptBuilder.Build(new PromptInput(
@@ -128,7 +137,8 @@ public sealed partial class AiRebalanceViewModel : ObservableObject
                 Account: AppState.Instance.Account,
                 AiResponseMarkdown: AiResponse);
             await Task.Run(() => PdfExporter.Export(filePath, report));
-            StatusMessage = $"PDF 저장 완료: {filePath}";
+            LastExportedPdfPath = filePath;
+            StatusMessage = "PDF 저장 완료. 아래 경로를 클릭하면 기본 뷰어에서 열립니다.";
         }
         catch (Exception ex)
         {

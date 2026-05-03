@@ -1,4 +1,6 @@
 using System.ComponentModel;
+using System.Diagnostics;
+using System.IO;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using SLifeIrpRebalancer.Core.Markdown;
@@ -102,6 +104,26 @@ public sealed partial class AiRebalanceView : Page
         };
 
         await dialog.ShowAsync();
+    }
+
+    private void OpenExportedPdfButton_Click(object sender, RoutedEventArgs e)
+    {
+        var path = ViewModel.LastExportedPdfPath;
+        if (string.IsNullOrEmpty(path) || !File.Exists(path))
+        {
+            ViewModel.StatusMessage = "PDF 파일을 찾을 수 없습니다 (이동 또는 삭제됐을 수 있습니다).";
+            return;
+        }
+
+        try
+        {
+            // UseShellExecute=true delegates to the OS file association so the user's preferred PDF viewer launches.
+            Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+        }
+        catch (System.Exception ex)
+        {
+            ViewModel.StatusMessage = $"PDF 열기 실패: {ex.Message}";
+        }
     }
 
     private async void ExportPdfButton_Click(object sender, RoutedEventArgs e)

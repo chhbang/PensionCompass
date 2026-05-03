@@ -15,6 +15,7 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -64,8 +65,17 @@
             Style="{StaticResource BodyTextBlockStyle}"
             TextWrapping="Wrap" />
 
-        <Border
+        <HyperlinkButton
             Grid.Row="5"
+            Visibility="{x:Bind ViewModel.HasExportedPdf, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}"
+            Click="OpenExportedPdfButton_Click"
+            Content="{x:Bind ViewModel.LastExportedPdfPath, Mode=OneWay}"
+            ToolTipService.ToolTip="기본 PDF 뷰어로 열기"
+            HorizontalAlignment="Left"
+            Padding="0,4" />
+
+        <Border
+            Grid.Row="6"
             Background="White"
             CornerRadius="4"
             BorderThickness="1"
