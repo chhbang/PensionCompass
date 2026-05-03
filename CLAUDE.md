@@ -49,6 +49,30 @@ dotnet build PensionCompass/PensionCompass.csproj -p:Platform=x64
 
 The WinUI 3 app cannot be launched via `dotnet run` because it is packaged (MSIX). Use Visual Studio's debugger, or for a one-off non-deployment run, build then execute the produced `.exe` from `PensionCompass/bin/x64/Debug/net8.0-windows10.0.19041.0/win-x64/`.
 
+## Sideload release packaging (CLI alternative to VS wizard)
+
+Visual Studio의 Solution Explorer → 우클릭 → **Package and Publish → Create App Packages...** 마법사가 사이드로드 .msix 빌드의 정공법입니다 (UI에서 인증서 생성·platform 선택·자동 업데이트 설정까지 한 번에). CLI로 동등한 결과를 내는 백업 경로:
+
+```pwsh
+# 1) 새 빌드를 내기 직전: 버전 한 칸 올리기 (기본은 build 자리, -Major / -Minor / -Revision 옵션)
+.\tools\Bump-Version.ps1
+
+# 2) 사이드로드 모드로 .msix 번들 생성 (인증서는 PensionCompass_TemporaryKey.pfx 사용)
+dotnet build PensionCompass\PensionCompass.csproj `
+    -c Release `
+    -p:Platform=x64 `
+    -p:GenerateAppxPackageOnBuild=true `
+    -p:AppxPackageSigningEnabled=true `
+    -p:AppxBundle=Always `
+    -p:AppxBundlePlatforms=x64 `
+    -p:UapAppxPackageBuildMode=SideloadOnly `
+    -p:AppxPackageDir=PensionCompass\AppPackages\
+```
+
+산출물은 `PensionCompass\AppPackages\PensionCompass_<version>_Test\` 안에 `.msixbundle` + `.cer` + `Add-AppDevPackage.ps1`로 떨어집니다 — VS 마법사 결과와 동일합니다. 다른 PC에 설치할 땐 `.cer`을 "신뢰할 수 있는 사람" 저장소에 등록한 뒤 `.msixbundle`을 더블클릭하거나, 받은 PC에서 `Add-AppDevPackage.ps1`을 관리자 PowerShell로 돌리면 됩니다.
+
+CLI 경로는 CI/스크립트화에 유리하지만, **자동 업데이트(.appinstaller) 설정은 마법사에서만 잡을 수 있습니다** — 자동 업데이트가 필요하면 마법사를 쓰세요. 인증서가 아직 없는 새 클론에서 CLI를 처음 돌리려면 인증서 자체는 한 번 마법사로 만들어야 합니다 (.pfx는 git ignore).
+
 ## What the app does
 
 `PensionCompass` is a Windows desktop app that produces AI-generated rebalancing proposals for a Samsung Life Insurance IRP (개인형 퇴직연금 / Korean individual retirement pension) account:
