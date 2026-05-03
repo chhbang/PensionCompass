@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="PensionCompass.Views.AiRebalanceView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:webview="using:Microsoft.UI.Xaml.Controls"
+    mc:Ignorable="d">
+
+    <Grid Padding="32" RowSpacing="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="AI 포트폴리오 리밸런싱" Style="{StaticResource TitleTextBlockStyle}" />
+
+        <TextBlock
+            Grid.Row="1"
+            Style="{StaticResource BodyTextBlockStyle}"
+            TextWrapping="Wrap"
+            Text="환경 설정의 AI 공급자/API Key, 상품 데이터 준비의 카탈로그, 내 계좌 정보의 보유 상품, 매도 대상 화면의 매도 정책·실행 시점을 종합하여 AI에게 리밸런싱 제안을 받습니다." />
+
+        <StackPanel Grid.Row="2" Spacing="4">
+            <TextBlock Text="추가 요구사항 (선택)" Style="{StaticResource BodyStrongTextBlockStyle}" />
+            <TextBox
+                Text="{x:Bind ViewModel.UserQuery, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                AcceptsReturn="True"
+                TextWrapping="Wrap"
+                Height="100"
+                PlaceholderText="예: '이란 전쟁 상황을 반영해주세요', '안정 자산 비중을 더 높여주세요' 등" />
+        </StackPanel>
+
+        <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+            <Button
+                x:Name="GenerateButton"
+                Content="포트폴리오 제안 받기"
+                Click="GenerateButton_Click"
+                IsEnabled="{x:Bind ViewModel.CanGenerate, Mode=OneWay}"
+                Style="{StaticResource AccentButtonStyle}" />
+            <Button
+                x:Name="PreviewPromptButton"
+                Content="프롬프트 미리보기"
+                Click="PreviewPromptButton_Click" />
+            <Button
+                x:Name="ExportPdfButton"
+                Content="PDF로 내보내기"
+                Click="ExportPdfButton_Click"
+                IsEnabled="{x:Bind ViewModel.CanExportPdf, Mode=OneWay}" />
+            <ProgressRing
+                IsActive="{x:Bind ViewModel.IsBusy, Mode=OneWay}"
+                Width="24" Height="24"
+                VerticalAlignment="Center" />
+        </StackPanel>
+
+        <TextBlock
+            Grid.Row="4"
+            Text="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
+            Style="{StaticResource BodyTextBlockStyle}"
+            TextWrapping="Wrap" />
+
+        <HyperlinkButton
+            Grid.Row="5"
+            Visibility="{x:Bind ViewModel.HasExportedPdf, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}"
+            Click="OpenExportedPdfButton_Click"
+            Content="{x:Bind ViewModel.LastExportedPdfPath, Mode=OneWay}"
+            ToolTipService.ToolTip="기본 PDF 뷰어로 열기"
+            HorizontalAlignment="Left"
+            Padding="0,4" />
+
+        <Border
+            Grid.Row="6"
+            Background="White"
+            CornerRadius="4"
+            BorderThickness="1"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}">
+            <webview:WebView2 x:Name="ResponseWebView" />
+        </Border>
+    </Grid>
+</Page>

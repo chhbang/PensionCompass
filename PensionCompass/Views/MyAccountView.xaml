@@ -1,0 +1,257 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="PensionCompass.Views.MyAccountView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:vm="using:PensionCompass.ViewModels"
+    xmlns:controls="using:Microsoft.UI.Xaml.Controls"
+    mc:Ignorable="d">
+
+    <Page.Resources>
+        <x:Double x:Key="ColName">280</x:Double>
+        <x:Double x:Key="ColCurrentValue">160</x:Double>
+        <x:Double x:Key="ColReturn">110</x:Double>
+        <x:Double x:Key="ColAnnualized">110</x:Double>
+        <x:Double x:Key="ColDays">100</x:Double>
+        <x:Double x:Key="ColShares">100</x:Double>
+        <x:Double x:Key="ColAction">60</x:Double>
+        <Style x:Key="OwnedHeaderTextStyle" TargetType="TextBlock" BasedOn="{StaticResource BodyStrongTextBlockStyle}">
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="0,0,8,0" />
+        </Style>
+    </Page.Resources>
+
+    <Grid Padding="32" RowSpacing="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="내 계좌 정보" Style="{StaticResource TitleTextBlockStyle}" />
+
+        <TextBlock
+            Grid.Row="1"
+            Style="{StaticResource BodyTextBlockStyle}"
+            TextWrapping="Wrap"
+            Text="총 적립금은 필수입니다. 입금액과 운용수익은 선택사항입니다. 보유 상품은 적립금이 필수이고 나머지(수익률, 연환산수익률, 운용일수, 좌수)는 선택사항입니다." />
+
+        <!-- 가입자 정보 / 희망사항 — AI에게 시간 지평과 종신형 제약을 알려주는 입력 -->
+        <StackPanel Grid.Row="2" Spacing="8" Padding="12" Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="4">
+            <TextBlock Text="가입자 정보 / 희망사항" Style="{StaticResource BodyStrongTextBlockStyle}" />
+            <Grid ColumnSpacing="16" RowSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Grid.Column="0" Text="현재 나이" VerticalAlignment="Center" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                <NumberBox
+                    Grid.Column="1"
+                    Width="100"
+                    Value="{x:Bind ViewModel.CurrentAge, Mode=TwoWay}"
+                    SpinButtonPlacementMode="Hidden"
+                    AcceptsExpression="False"
+                    Minimum="0" Maximum="120" />
+                <TextBlock Grid.Column="2" Text="세" VerticalAlignment="Center" Margin="-8,0,0,0" />
+
+                <TextBlock Grid.Column="3" Text="연금 개시 희망 연령" VerticalAlignment="Center" Margin="24,0,0,0" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                <NumberBox
+                    Grid.Column="4"
+                    Width="100"
+                    Value="{x:Bind ViewModel.DesiredAnnuityStartAge, Mode=TwoWay}"
+                    SpinButtonPlacementMode="Hidden"
+                    AcceptsExpression="False"
+                    Minimum="55" Maximum="120" />
+                <TextBlock Grid.Column="5" Text="세 (IRP 연금은 일반적으로 만 55세부터 개시 가능)" VerticalAlignment="Center" Margin="-8,0,0,0"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            </Grid>
+            <CheckBox
+                Content="종신 지급형 연금 수령 의향 (체크 시 추천 후보가 삼성생명보험 직접 운용 상품으로 제한됩니다)"
+                IsChecked="{x:Bind ViewModel.WantsLifelongAnnuity, Mode=TwoWay}" />
+
+            <Grid ColumnSpacing="16" RowSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="월 추가 납입" VerticalAlignment="Center" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                <NumberBox
+                    Grid.Column="1"
+                    Width="180"
+                    Value="{x:Bind ViewModel.MonthlyContribution, Mode=TwoWay}"
+                    SpinButtonPlacementMode="Hidden"
+                    AcceptsExpression="False"
+                    Minimum="0" />
+                <TextBlock Grid.Column="2" Text="₩ — 0이면 추가 납입 없음 (현 잔고만 운용), 양수면 매월 적립식 자동이체 가정"
+                           VerticalAlignment="Center" TextWrapping="Wrap"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            </Grid>
+
+            <StackPanel Spacing="4">
+                <TextBlock Text="다른 노후 자산 / 기타 참고사항 (선택)" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                <TextBox
+                    Text="{x:Bind ViewModel.OtherRetirementAssets, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                    AcceptsReturn="True"
+                    TextWrapping="Wrap"
+                    Height="68"
+                    PlaceholderText="예: 국민연금 가입 중, 주택 1채 보유, 별도 연금저축 운용 중, 배우자 별도 IRP 등 — 없으면 비워두세요" />
+            </StackPanel>
+        </StackPanel>
+
+        <!-- 계좌 합계 -->
+        <Grid Grid.Row="3" ColumnSpacing="16" RowSpacing="8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <TextBlock Grid.Column="0" Text="총 적립금 *" VerticalAlignment="Center" Style="{StaticResource BodyStrongTextBlockStyle}" />
+            <NumberBox
+                Grid.Column="1"
+                Width="200"
+                Value="{x:Bind ViewModel.TotalAmount, Mode=TwoWay}"
+                SpinButtonPlacementMode="Hidden"
+                AcceptsExpression="False" />
+
+            <TextBlock Grid.Column="2" Text="입금액" VerticalAlignment="Center" Margin="24,0,0,0" Style="{StaticResource BodyStrongTextBlockStyle}" />
+            <NumberBox
+                Grid.Column="3"
+                Width="200"
+                Value="{x:Bind ViewModel.DepositAmount, Mode=TwoWay}"
+                SpinButtonPlacementMode="Hidden"
+                AcceptsExpression="False" />
+
+            <TextBlock Grid.Column="4" Text="운용수익" VerticalAlignment="Center" Margin="24,0,0,0" Style="{StaticResource BodyStrongTextBlockStyle}" />
+            <NumberBox
+                Grid.Column="5"
+                Width="200"
+                Value="{x:Bind ViewModel.ProfitAmount, Mode=TwoWay}"
+                SpinButtonPlacementMode="Hidden"
+                AcceptsExpression="False" />
+        </Grid>
+
+        <!-- 상품 검색 / 추가 -->
+        <StackPanel Grid.Row="4" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+            <TextBlock Text="보유 상품 추가" VerticalAlignment="Center" Style="{StaticResource BodyStrongTextBlockStyle}" />
+            <AutoSuggestBox
+                x:Name="ProductSearchBox"
+                Width="480"
+                PlaceholderText="상품명으로 검색 (Enter 키 또는 추가 버튼으로 등록)"
+                QueryIcon="Find"
+                TextChanged="ProductSearchBox_TextChanged"
+                QuerySubmitted="ProductSearchBox_QuerySubmitted" />
+            <Button Content="추가" Click="AddButton_Click" Style="{StaticResource AccentButtonStyle}" />
+            <Button Content="계좌 정보 초기화" Click="ResetAccountButton_Click" />
+        </StackPanel>
+
+        <!-- 보유 상품 헤더 -->
+        <Border Grid.Row="5" Background="{ThemeResource LayerFillColorDefaultBrush}" Padding="12,8">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock Text="상품명" Width="{StaticResource ColName}" Style="{StaticResource OwnedHeaderTextStyle}" />
+                <TextBlock Text="적립금 *" Width="{StaticResource ColCurrentValue}" Style="{StaticResource OwnedHeaderTextStyle}" />
+                <TextBlock Text="수익률(%)" Width="{StaticResource ColReturn}" Style="{StaticResource OwnedHeaderTextStyle}" />
+                <TextBlock Text="연환산(%)" Width="{StaticResource ColAnnualized}" Style="{StaticResource OwnedHeaderTextStyle}" />
+                <TextBlock Text="운용일수" Width="{StaticResource ColDays}" Style="{StaticResource OwnedHeaderTextStyle}" />
+                <TextBlock Text="좌수" Width="{StaticResource ColShares}" Style="{StaticResource OwnedHeaderTextStyle}" />
+                <TextBlock Text="" Width="{StaticResource ColAction}" />
+            </StackPanel>
+        </Border>
+
+        <!-- 보유 상품 행들 -->
+        <ListView
+            Grid.Row="6"
+            ItemsSource="{x:Bind ViewModel.OwnedItems, Mode=OneWay}"
+            SelectionMode="None"
+            IsItemClickEnabled="False">
+            <ListView.ItemContainerStyle>
+                <Style TargetType="ListViewItem">
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                    <Setter Property="Padding" Value="12,4" />
+                    <Setter Property="MinHeight" Value="0" />
+                </Style>
+            </ListView.ItemContainerStyle>
+            <ListView.ItemTemplate>
+                <DataTemplate x:DataType="vm:OwnedProductRow">
+                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <TextBlock
+                            Text="{x:Bind ProductName, Mode=OneWay}"
+                            Width="{StaticResource ColName}"
+                            VerticalAlignment="Center"
+                            TextTrimming="CharacterEllipsis"
+                            ToolTipService.ToolTip="{x:Bind ProductName, Mode=OneWay}" />
+                        <NumberBox
+                            Width="{StaticResource ColCurrentValue}"
+                            Value="{x:Bind CurrentValue, Mode=TwoWay}"
+                            SpinButtonPlacementMode="Hidden"
+                            AcceptsExpression="False" />
+                        <Grid Width="{StaticResource ColReturn}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <NumberBox
+                                Grid.Column="0"
+                                Value="{x:Bind ReturnRate, Mode=TwoWay}"
+                                SpinButtonPlacementMode="Hidden"
+                                AcceptsExpression="False" />
+                            <TextBlock
+                                Grid.Column="1"
+                                Text="%"
+                                VerticalAlignment="Center"
+                                Margin="4,0,0,0" />
+                        </Grid>
+                        <Grid Width="{StaticResource ColAnnualized}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <NumberBox
+                                Grid.Column="0"
+                                Value="{x:Bind AnnualizedReturn, Mode=TwoWay}"
+                                SpinButtonPlacementMode="Hidden"
+                                AcceptsExpression="False" />
+                            <TextBlock
+                                Grid.Column="1"
+                                Text="%"
+                                VerticalAlignment="Center"
+                                Margin="4,0,0,0" />
+                        </Grid>
+                        <NumberBox
+                            Width="{StaticResource ColDays}"
+                            Value="{x:Bind InvestedDays, Mode=TwoWay}"
+                            SpinButtonPlacementMode="Hidden"
+                            AcceptsExpression="False" />
+                        <NumberBox
+                            Width="{StaticResource ColShares}"
+                            Value="{x:Bind TotalShares, Mode=TwoWay}"
+                            SpinButtonPlacementMode="Hidden"
+                            AcceptsExpression="False" />
+                        <Button
+                            Width="{StaticResource ColAction}"
+                            Click="DeleteRow_Click"
+                            Tag="{x:Bind}"
+                            Background="Transparent">
+                            <SymbolIcon Symbol="Delete" />
+                        </Button>
+                    </StackPanel>
+                </DataTemplate>
+            </ListView.ItemTemplate>
+        </ListView>
+    </Grid>
+</Page>

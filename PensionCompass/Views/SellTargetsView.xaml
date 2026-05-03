@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="PensionCompass.Views.SellTargetsView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:vm="using:PensionCompass.ViewModels"
+    mc:Ignorable="d">
+
+    <Page.Resources>
+        <x:Double x:Key="ColName">360</x:Double>
+        <x:Double x:Key="ColCurrentValue">180</x:Double>
+        <x:Double x:Key="ColSellable">100</x:Double>
+        <Style x:Key="SellHeaderTextStyle" TargetType="TextBlock" BasedOn="{StaticResource BodyStrongTextBlockStyle}">
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="0,0,8,0" />
+        </Style>
+    </Page.Resources>
+
+    <Grid Padding="32" RowSpacing="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="매도 대상 및 시점 설정" Style="{StaticResource TitleTextBlockStyle}" />
+
+        <TextBlock
+            Grid.Row="1"
+            Style="{StaticResource BodyTextBlockStyle}"
+            TextWrapping="Wrap"
+            Text="리밸런싱의 성격(즉시 vs 만기 예약)과 다음 리밸런싱까지의 계획 주기를 정하고, 절대 매도하면 안 되는 보유 상품의 매도 가능 체크를 해제합니다. 매도/매수 비중과 부분 매도 여부는 AI가 판단합니다." />
+
+        <RadioButtons
+            Grid.Row="2"
+            Header="리밸런싱 시점 *"
+            SelectedIndex="{x:Bind ViewModel.TimingIndex, Mode=TwoWay}"
+            MaxColumns="1">
+            <x:String>최대한 즉시 일반 리밸런싱 진행</x:String>
+            <x:String>만기 예약용 리밸런싱 진행 (실행 날짜 별도 입력)</x:String>
+        </RadioButtons>
+
+        <StackPanel
+            Grid.Row="3"
+            Orientation="Horizontal"
+            Spacing="12"
+            VerticalAlignment="Center"
+            Visibility="{x:Bind ViewModel.IsExecutionDateRequired, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
+            <TextBlock Text="실행 날짜 *" VerticalAlignment="Center" Style="{StaticResource BodyStrongTextBlockStyle}" />
+            <CalendarDatePicker
+                Width="240"
+                PlaceholderText="만기 또는 실행 예정일 선택"
+                Date="{x:Bind ViewModel.ExecutionDate, Mode=TwoWay}" />
+        </StackPanel>
+
+        <RadioButtons
+            Grid.Row="4"
+            Header="다음 리밸런싱까지 계획 주기 * (AI가 펀드 변동성 허용치와 참고할 수익률 기간을 판단하는 데 사용)"
+            SelectedIndex="{x:Bind ViewModel.CycleIndex, Mode=TwoWay}"
+            MaxColumns="3">
+            <x:String>3개월</x:String>
+            <x:String>6개월</x:String>
+            <x:String>1년</x:String>
+        </RadioButtons>
+
+        <TextBlock
+            Grid.Row="5"
+            Text="{x:Bind ViewModel.PlannedSellSummary, Mode=OneWay}"
+            Style="{StaticResource BodyStrongTextBlockStyle}"
+            Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+
+        <Border Grid.Row="6" Background="{ThemeResource LayerFillColorDefaultBrush}" Padding="12,8">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock Text="상품명" Width="{StaticResource ColName}" Style="{StaticResource SellHeaderTextStyle}" />
+                <TextBlock Text="적립금" Width="{StaticResource ColCurrentValue}" Style="{StaticResource SellHeaderTextStyle}" />
+                <TextBlock Text="매도 가능" Width="{StaticResource ColSellable}" Style="{StaticResource SellHeaderTextStyle}" HorizontalTextAlignment="Center" />
+            </StackPanel>
+        </Border>
+
+        <ListView
+            Grid.Row="7"
+            ItemsSource="{x:Bind ViewModel.OwnedItems, Mode=OneWay}"
+            SelectionMode="None"
+            IsItemClickEnabled="False">
+            <ListView.ItemContainerStyle>
+                <Style TargetType="ListViewItem">
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                    <Setter Property="Padding" Value="12,4" />
+                    <Setter Property="MinHeight" Value="0" />
+                </Style>
+            </ListView.ItemContainerStyle>
+            <ListView.ItemTemplate>
+                <DataTemplate x:DataType="vm:SellTargetsRow">
+                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <TextBlock
+                            Text="{x:Bind ProductName}"
+                            Width="{StaticResource ColName}"
+                            VerticalAlignment="Center"
+                            TextTrimming="CharacterEllipsis"
+                            ToolTipService.ToolTip="{x:Bind ProductName}" />
+                        <TextBlock
+                            Text="{x:Bind CurrentValue, Converter={StaticResource WonFormatConverter}}"
+                            Width="{StaticResource ColCurrentValue}"
+                            VerticalAlignment="Center"
+                            HorizontalTextAlignment="Right"
+                            Padding="0,0,12,0" />
+                        <Grid Width="{StaticResource ColSellable}">
+                            <CheckBox
+                                IsChecked="{x:Bind IsSellable, Mode=TwoWay}"
+                                MinWidth="0"
+                                Padding="0"
+                                HorizontalAlignment="Center" />
+                        </Grid>
+                    </StackPanel>
+                </DataTemplate>
+            </ListView.ItemTemplate>
+        </ListView>
+    </Grid>
+</Page>
