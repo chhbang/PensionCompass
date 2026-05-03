@@ -59,10 +59,18 @@
 
   <!-- Publish Properties -->
   <PropertyGroup>
-    <PublishReadyToRun Condition="'$(Configuration)' == 'Debug'">False</PublishReadyToRun>
-    <PublishReadyToRun Condition="'$(Configuration)' != 'Debug'">True</PublishReadyToRun>
-    <PublishTrimmed Condition="'$(Configuration)' == 'Debug'">False</PublishTrimmed>
-    <PublishTrimmed Condition="'$(Configuration)' != 'Debug'">True</PublishTrimmed>
+    <!--
+      PublishTrimmed / PublishReadyToRun 은 Release 에서도 OFF 로 둡니다.
+      WinUI 3 + x:Bind + 타 어셈블리(Core 라이브러리)의 타입을 DataTemplate 의
+      x:DataType 으로 참조하는 패턴(예: DataPreparationView 의 TabView 안 ListView)에서
+      트리머가 사용처를 못 찾고 잘라내, 디버그에선 멀쩡한데 Release MSIX 에서만
+      탭 전환 시 다운되는 사례가 발생합니다. 사이드로드 배포에서 파일 크기 절감 이득보다
+      안정성 손실이 훨씬 큽니다 — [DynamicallyAccessedMembers] 주석 작업 비용도 큼.
+      MS 스토어 / 더 큰 배포로 옮기게 되어 트리밍을 다시 켜려면 모든 화면을 Release 에서
+      smoke 테스트한 뒤에 켜세요.
+    -->
+    <PublishReadyToRun>False</PublishReadyToRun>
+    <PublishTrimmed>False</PublishTrimmed>
     <GenerateAppInstallerFile>False</GenerateAppInstallerFile>
     <AppxPackageSigningEnabled>True</AppxPackageSigningEnabled>
     <PackageCertificateKeyFile>PensionCompass_TemporaryKey.pfx</PackageCertificateKeyFile>
