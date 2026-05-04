@@ -1,4 +1,5 @@
 using PensionCompass.Core.Ai;
+using Windows.Security.Credentials;
 using Windows.Storage;
 
 namespace PensionCompass.Services;
@@ -6,19 +7,21 @@ namespace PensionCompass.Services;
 /// <summary>
 /// Persists user-level settings across runs:
 /// - AI provider choice ("Claude" / "Gemini" / "GPT")
-/// - per-provider model id and API key (each provider has its own credentials)
+/// - per-provider model id (LocalSettings) and API key (Windows credential vault)
 /// - reasoning effort (Off / Low / Medium / High)
 /// Subscriber info (age, annuity-start age, lifelong-annuity preference) lives on
 /// <see cref="Core.Models.AccountStatusModel"/>, not here — see <see cref="AppState"/>'s migration.
-/// Backing store is per-user packaged-app LocalSettings. API keys are stored in plain text —
-/// adequate for a single-user personal app, but if multi-user / shared-machine scenarios become
-/// relevant, migrate to <c>Windows.Security.Credentials.PasswordVault</c> for OS-level encryption.
+///
+/// Non-secret prefs use per-user packaged-app LocalSettings.
+/// API keys go through <see cref="PasswordVault"/> so they're encrypted at rest by Windows
+/// (user-credential-keyed). Builds prior to v1.0.4 stored plain text in LocalSettings; the
+/// constructor sweeps any leftover plaintext entries into the vault on first launch.
 /// </summary>
 public sealed class SettingsService
 {
     private const string AiProviderKey = "AiProvider";
     private const string LegacyApiKeyKey = "ApiKey"; // single-key field used before per-provider keys
-    private const string ClaudeApiKeyKey = "ClaudeApiKey";
+    private const string ClaudeApiKeyKey = "ClaudeApiKey"; // legacy plaintext slot — only used during migration sweep
     private const string GeminiApiKeyKey = "GeminiApiKey";
     private const string GptApiKeyKey = "GptApiKey";
     private const string LegacyRestrictToSamsungLifeKey = "RestrictToSamsungLifeForLifelongAnnuity"; // moved to AccountStatusModel.WantsLifelongAnnuity
@@ -27,11 +30,18 @@ public sealed class SettingsService
     private const string GptModelKey = "GptModel";
     private const string ThinkingLevelKey = "ThinkingLevel";
 
+    /// <summary>Single resource string for all API key entries; provider name is stored as the userName field.</summary>
+    private const string VaultResource = "PensionCompass.ApiKey";
+    private const string VaultProviderClaude = "Claude";
+    private const string VaultProviderGemini = "Gemini";
+    private const string VaultProviderGpt = "GPT";
+
     private readonly ApplicationDataContainer _store = ApplicationData.Current.LocalSettings;
 
     public SettingsService()
     {
         MigrateLegacyApiKey();
+        MigratePlaintextApiKeysToVault();
     }
 
     public string AiProvider
@@ -42,20 +52,20 @@ public sealed class SettingsService
 
     public string ClaudeApiKey
     {
-        get => _store.Values[ClaudeApiKeyKey] as string ?? string.Empty;
-        set => _store.Values[ClaudeApiKeyKey] = value;
+        get => ReadVault(VaultProviderClaude);
+        set => WriteVault(VaultProviderClaude, value);
     }
 
     public string GeminiApiKey
     {
-        get => _store.Values[GeminiApiKeyKey] as string ?? string.Empty;
-        set => _store.Values[GeminiApiKeyKey] = value;
+        get => ReadVault(VaultProviderGemini);
+        set => WriteVault(VaultProviderGemini, value);
     }
 
     public string GptApiKey
     {
-        get => _store.Values[GptApiKeyKey] as string ?? string.Empty;
-        set => _store.Values[GptApiKeyKey] = value;
+        get => ReadVault(VaultProviderGpt);
+        set => WriteVault(VaultProviderGpt, value);
     }
 
     /// <summary>
@@ -118,8 +128,9 @@ public sealed class SettingsService
     /// <summary>
     /// Earlier builds stored a single shared <c>ApiKey</c> regardless of provider; this caused 401s
     /// when the user had only entered (say) a Gemini key but switched to Claude. On first run after
-    /// upgrade we move the legacy value into whichever per-provider slot is currently selected,
-    /// then drop the legacy key.
+    /// upgrade we move the legacy value into whichever per-provider LocalSettings slot is currently
+    /// selected; the subsequent <see cref="MigratePlaintextApiKeysToVault"/> sweep then carries it
+    /// (and any other already-typed keys) into the credential vault.
     /// </summary>
     private void MigrateLegacyApiKey()
     {
@@ -137,5 +148,71 @@ public sealed class SettingsService
             _store.Values[providerSlot] = legacy;
 
         _store.Values.Remove(LegacyApiKeyKey);
+    }
+
+    /// <summary>
+    /// Sweeps any plaintext API keys still sitting in LocalSettings (from builds before the vault
+    /// migration) into the credential vault, then deletes the LocalSettings entries. Idempotent —
+    /// after the first successful sweep there's nothing left to read so subsequent launches are no-ops.
+    /// Each provider migrates independently so a partial failure on one doesn't block the others.
+    /// </summary>
+    private void MigratePlaintextApiKeysToVault()
+    {
+        var slots = new (string LocalSettingsKey, string VaultUserName)[]
+        {
+            (ClaudeApiKeyKey, VaultProviderClaude),
+            (GeminiApiKeyKey, VaultProviderGemini),
+            (GptApiKeyKey, VaultProviderGpt),
+        };
+
+        foreach (var (localKey, userName) in slots)
+        {
+            if (_store.Values[localKey] is not string plaintext || string.IsNullOrEmpty(plaintext))
+                continue;
+            try
+            {
+                WriteVault(userName, plaintext);
+                _store.Values.Remove(localKey);
+            }
+            catch
+            {
+                // Vault write failed (rare — disabled by group policy etc.). Leave the plaintext
+                // in place rather than dropping the user's API key; next launch will retry.
+            }
+        }
+    }
+
+    private static string ReadVault(string userName)
+    {
+        try
+        {
+            var vault = new PasswordVault();
+            var credential = vault.Retrieve(VaultResource, userName);
+            credential.RetrievePassword();
+            return credential.Password ?? string.Empty;
+        }
+        catch
+        {
+            // PasswordVault.Retrieve throws when no matching entry exists — empty is the natural fallback.
+            return string.Empty;
+        }
+    }
+
+    private static void WriteVault(string userName, string value)
+    {
+        var vault = new PasswordVault();
+
+        // Remove any existing entry first so we don't duplicate or hit "already exists" semantics.
+        try
+        {
+            var existing = vault.Retrieve(VaultResource, userName);
+            vault.Remove(existing);
+        }
+        catch { /* nothing to remove */ }
+
+        // Empty value means "clear the credential" — already removed above, nothing more to do.
+        if (string.IsNullOrEmpty(value)) return;
+
+        vault.Add(new PasswordCredential(VaultResource, userName, value));
     }
 }
