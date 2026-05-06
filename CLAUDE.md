@@ -70,7 +70,7 @@ dotnet build PensionCompass\PensionCompass.csproj `
     -p:AppxPackageDir=AppPackages\
 ```
 
-산출물은 `PensionCompass\AppPackages\PensionCompass_<version>_Test\` 안에 `.msixbundle` + `.cer`로 떨어집니다. 다른 PC에 설치할 땐 `.cer`을 "신뢰할 수 있는 사람" 저장소에 등록한 뒤 `.msixbundle`을 더블클릭하면 됩니다.
+산출물은 `PensionCompass\AppPackages\PensionCompass_<version>_Test\` 안에 `.msixbundle` + `.cer`로 떨어집니다. 다른 PC에 설치할 땐 `.cer`을 **로컬 컴퓨터 / 신뢰할 수 있는 루트 인증 기관(Trusted Root Certification Authorities)** 저장소에 등록한 뒤 `.msixbundle`을 더블클릭하면 됩니다 — `Import-Certificate -FilePath <path>.cer -CertStoreLocation Cert:\LocalMachine\Root` (관리자 PowerShell). 자체 서명 인증서는 자기 자신이 루트라 게시자(Trusted Publishers)나 사용자(Trusted People) 저장소에 넣으면 체인 검증이 끊겨 `0x800B010A` (CERT_E_CHAINING) 오류로 설치가 실패합니다.
 
 CLI 경로는 CI/스크립트화에 유리하지만 마법사와 비교하면 두 가지 차이가 있습니다:
 
