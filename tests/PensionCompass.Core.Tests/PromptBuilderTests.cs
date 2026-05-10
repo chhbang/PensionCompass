@@ -320,6 +320,61 @@ public class PromptBuilderTests
     }
 
     [Fact]
+    public void Build_WithPriorOutcome_EmbedsRealizedReturnSection()
+    {
+        var outcome = new PeriodComparison(
+            PriorTimestamp: new DateTime(2026, 2, 1, 10, 0, 0, DateTimeKind.Local),
+            CurrentTimestamp: new DateTime(2026, 5, 1, 10, 0, 0, DateTimeKind.Local),
+            DaysElapsed: 89,
+            PriorTotal: 100_000_000m,
+            CurrentTotal: 110_000_000m,
+            NetContribution: 3_000_000m,
+            PeriodReturnPercent: 7m,
+            AnnualizedReturnPercent: 31m,
+            ContributionSource: ContributionSource.DepositAmountDelta,
+            HoldingChanges: []);
+
+        var output = PromptBuilder.Build(new PromptInput(
+            null, SampleAccount(), "", PriorSession: null, PriorOutcome: outcome));
+
+        Assert.Contains("## 직전 회차 → 현재 시점 실제 성과", output.UserPrompt);
+        Assert.Contains("89일", output.UserPrompt);
+        Assert.Contains("+7.00%", output.UserPrompt);
+        Assert.Contains("연환산 약 +31.00%", output.UserPrompt);
+        Assert.Contains("DepositAmount 델타 기준 — 정확", output.UserPrompt);
+    }
+
+    [Fact]
+    public void Build_WithPriorOutcome_NoteWhenContributionUnavailable()
+    {
+        var outcome = new PeriodComparison(
+            PriorTimestamp: new DateTime(2026, 2, 1, 10, 0, 0, DateTimeKind.Local),
+            CurrentTimestamp: new DateTime(2026, 5, 1, 10, 0, 0, DateTimeKind.Local),
+            DaysElapsed: 89,
+            PriorTotal: 100_000_000m,
+            CurrentTotal: 110_000_000m,
+            NetContribution: null,
+            PeriodReturnPercent: 10m,
+            AnnualizedReturnPercent: null,
+            ContributionSource: ContributionSource.Unavailable,
+            HoldingChanges: []);
+
+        var output = PromptBuilder.Build(new PromptInput(
+            null, SampleAccount(), "", PriorSession: null, PriorOutcome: outcome));
+
+        Assert.Contains("기간 수익률 (입금 차감 안 됨, gross): +10.00%", output.UserPrompt);
+        Assert.Contains("정보 없음", output.UserPrompt);
+    }
+
+    [Fact]
+    public void Build_NoPriorOutcome_OmitsRealizedSection()
+    {
+        var output = PromptBuilder.Build(new PromptInput(null, SampleAccount(), ""));
+
+        Assert.DoesNotContain("## 직전 회차 → 현재 시점 실제 성과", output.UserPrompt);
+    }
+
+    [Fact]
     public void Build_WithPriorSession_EmbedsTimestampAiAndMarkdown()
     {
         var prior = new RebalanceSession(

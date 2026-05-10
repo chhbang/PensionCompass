@@ -20,12 +20,12 @@ namespace PensionCompass.ViewModels;
 /// </summary>
 public sealed partial class HistoryViewModel : ObservableObject
 {
-    public ObservableCollection<RebalanceSessionEntry> Entries { get; } = [];
+    public ObservableCollection<HistoryEntryRow> Entries { get; } = [];
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasSelection))]
     [NotifyPropertyChangedFor(nameof(SelectedSummary))]
-    private RebalanceSessionEntry? _selectedEntry;
+    private HistoryEntryRow? _selectedEntry;
 
     /// <summary>The full session loaded for the current selection — used to render markdown.</summary>
     [ObservableProperty]
@@ -51,8 +51,32 @@ public sealed partial class HistoryViewModel : ObservableObject
         Entries.Clear();
         try
         {
-            foreach (var entry in RebalanceHistoryStore.List(AppState.Instance.CandidateHistoryRoots()))
-                Entries.Add(entry);
+            // Listing returns metadata only; load each session's full body so we can compute
+            // the period comparison between adjacent entries (and current account state for
+            // the newest one). Sessions are small (<100 KB) so the I/O is negligible.
+            var rawEntries = RebalanceHistoryStore.List(AppState.Instance.CandidateHistoryRoots());
+            var loaded = rawEntries
+                .Select(e => (Entry: e, Session: RebalanceHistoryStore.Load(e.FilePath)))
+                .Where(x => x.Session is not null)
+                .ToList();
+
+            // entries are sorted newest-first. For each, compare to the next-newer (i-1) session,
+            // or to the current live account when it's the newest (i=0).
+            for (int i = 0; i < loaded.Count; i++)
+            {
+                var (entry, session) = loaded[i];
+                PeriodComparison? comp;
+                if (i == 0)
+                {
+                    comp = PeriodComparisonCalculator.Compare(
+                        session!, AppState.Instance.Account, DateTime.Now);
+                }
+                else
+                {
+                    comp = PeriodComparisonCalculator.Compare(session!, loaded[i - 1].Session!);
+                }
+                Entries.Add(new HistoryEntryRow(entry, comp));
+            }
 
             StatusMessage = Entries.Count switch
             {
@@ -67,7 +91,7 @@ public sealed partial class HistoryViewModel : ObservableObject
         }
     }
 
-    partial void OnSelectedEntryChanged(RebalanceSessionEntry? value)
+    partial void OnSelectedEntryChanged(HistoryEntryRow? value)
     {
         if (value is null)
         {
@@ -81,7 +105,8 @@ public sealed partial class HistoryViewModel : ObservableObject
 
     /// <summary>
     /// Loads a session from an arbitrary path on disk (PC 어디서든 불러오기 시나리오).
-    /// Inserts it into the listing if it's not already there so the user can select it.
+    /// Inserts it into the listing if it's not already there so the user can select it. The
+    /// imported row carries no period comparison (it stands alone outside the time-ordered list).
     /// </summary>
     public void LoadFromExternalFile(string path)
     {
@@ -97,8 +122,8 @@ public sealed partial class HistoryViewModel : ObservableObject
         var existing = Entries.FirstOrDefaultMatching(entry.FilePath);
         if (existing is null)
         {
-            Entries.Insert(0, entry);
-            existing = entry;
+            existing = new HistoryEntryRow(entry, comparison: null);
+            Entries.Insert(0, existing);
         }
         SelectedEntry = existing;
     }
@@ -144,7 +169,7 @@ public sealed partial class HistoryViewModel : ObservableObject
 
 internal static class HistoryListExtensions
 {
-    public static RebalanceSessionEntry? FirstOrDefaultMatching(this ObservableCollection<RebalanceSessionEntry> list, string path)
+    public static HistoryEntryRow? FirstOrDefaultMatching(this ObservableCollection<HistoryEntryRow> list, string path)
     {
         foreach (var item in list)
             if (string.Equals(item.FilePath, path, StringComparison.OrdinalIgnoreCase))

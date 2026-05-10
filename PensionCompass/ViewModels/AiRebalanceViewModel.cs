@@ -48,6 +48,18 @@ public sealed partial class AiRebalanceViewModel : ObservableObject
     /// <summary>The full session document loaded lazily when the user picks an entry.</summary>
     private RebalanceSession? _resolvedPriorSession;
 
+    /// <summary>
+    /// Realized period return between the selected prior session and the current account state,
+    /// computed by <see cref="PeriodComparisonCalculator"/> whenever <see cref="SelectedPriorEntry"/>
+    /// resolves. The view binds to the display props below to show a quick summary card so the user
+    /// can see what factual data will reach the AI before they hit "포트폴리오 제안 받기".
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasPriorOutcome))]
+    [NotifyPropertyChangedFor(nameof(PriorOutcomeHeader))]
+    [NotifyPropertyChangedFor(nameof(PriorOutcomeDetail))]
+    private PeriodComparison? _priorOutcome;
+
     /// <summary>Recent past sessions, newest first. Loaded by <see cref="RefreshHistoryEntries"/>.</summary>
     public ObservableCollection<RebalanceSessionEntry> AvailableHistory { get; } = [];
 
@@ -95,6 +107,38 @@ public sealed partial class AiRebalanceViewModel : ObservableObject
         ? "이전 회차 참고 안 함"
         : $"{SelectedPriorEntry.Meta.Timestamp.ToLocalTime():yyyy-MM-dd HH:mm}  ·  {SelectedPriorEntry.Meta.ProviderName} ({SelectedPriorEntry.Meta.ModelId})";
 
+    public bool HasPriorOutcome => PriorOutcome is not null;
+
+    public string PriorOutcomeHeader
+    {
+        get
+        {
+            if (PriorOutcome is not { } o) return string.Empty;
+            var pct = o.PeriodReturnPercent;
+            var pctText = pct.HasValue ? $"{(pct.Value >= 0 ? "+" : "")}{pct.Value:0.00}%" : "N/A";
+            return $"직전 회차 → 현재: {o.DaysElapsed}일 동안 {pctText}";
+        }
+    }
+
+    public string PriorOutcomeDetail
+    {
+        get
+        {
+            if (PriorOutcome is not { } o) return string.Empty;
+            var contribNote = o.ContributionSource switch
+            {
+                ContributionSource.DepositAmountDelta => "DepositAmount 델타",
+                ContributionSource.MonthlyEstimate => "월 적립 추정",
+                _ => "입금 차감 안 됨",
+            };
+            var contribAmount = o.NetContribution.HasValue
+                ? $"{o.NetContribution.Value:N0}원 ({contribNote})"
+                : "정보 없음";
+            var annualized = o.AnnualizedReturnPercent is { } ann ? $"  ·  연환산 약 {(ann >= 0 ? "+" : "")}{ann:0.00}%" : string.Empty;
+            return $"₩{o.PriorTotal:N0} → ₩{o.CurrentTotal:N0}  ·  신규 입금 {contribAmount}{annualized}";
+        }
+    }
+
     /// <summary>Reloads the recent-history listing — call when navigating to the screen and after saves.
     /// If the History screen handed off a "use this as prior" entry, pre-select it here.</summary>
     public void RefreshHistoryEntries()
@@ -129,11 +173,15 @@ public sealed partial class AiRebalanceViewModel : ObservableObject
     /// execution date by emitting placeholder lines, and the preview should reflect that exact output.
     /// </summary>
     public PromptOutput BuildPromptPreview()
-        => PromptBuilder.Build(new PromptInput(
+    {
+        var prior = ResolvePriorSession();
+        return PromptBuilder.Build(new PromptInput(
             AppState.Instance.Catalog,
             AppState.Instance.Account,
             UserQuery,
-            ResolvePriorSession()));
+            prior,
+            PriorOutcome));
+    }
 
     public async Task GenerateProposalAsync(CancellationToken cancellationToken = default)
     {
@@ -170,11 +218,13 @@ public sealed partial class AiRebalanceViewModel : ObservableObject
         ValidationResult = null;
         try
         {
+            var resolvedPrior = ResolvePriorSession();
             var prompt = PromptBuilder.Build(new PromptInput(
                 AppState.Instance.Catalog,
                 account,
                 UserQuery,
-                ResolvePriorSession()));
+                resolvedPrior,
+                PriorOutcome));
 
             var client = AiClientFactory.Create(settings.AiProvider, apiKey, settings.GetActiveModel());
             _lastProviderName = client.ProviderName;
@@ -284,25 +334,35 @@ public sealed partial class AiRebalanceViewModel : ObservableObject
 
     /// <summary>
     /// Loads the full session document for the user-selected combo entry, caching it so we don't
-    /// re-read the file on every prompt rebuild. Resets when the user changes selection.
+    /// re-read the file on every prompt rebuild. Resets when the user changes selection. Also
+    /// recomputes <see cref="PriorOutcome"/> against the live account state on each fresh load
+    /// so the comparison stays in step if the user edits their account between selections.
     /// </summary>
     private RebalanceSession? ResolvePriorSession()
     {
         if (SelectedPriorEntry is null)
         {
             _resolvedPriorSession = null;
+            PriorOutcome = null;
             return null;
         }
         if (_resolvedPriorSession?.Meta.Timestamp == SelectedPriorEntry.Meta.Timestamp)
             return _resolvedPriorSession;
         _resolvedPriorSession = RebalanceHistoryStore.Load(SelectedPriorEntry.FilePath);
+        PriorOutcome = _resolvedPriorSession is not null
+            ? PeriodComparisonCalculator.Compare(_resolvedPriorSession, AppState.Instance.Account, DateTime.Now)
+            : null;
         return _resolvedPriorSession;
     }
 
     partial void OnSelectedPriorEntryChanged(RebalanceSessionEntry? value)
     {
-        // Invalidate the cached document so the next prompt build re-reads if needed.
+        // Invalidate the cached document and outcome.
         _resolvedPriorSession = null;
+        PriorOutcome = null;
+        // Eagerly load + compute so the outcome banner appears immediately on selection,
+        // not only after the user clicks Generate / Preview. File is small (<100 KB).
+        if (value is not null) ResolvePriorSession();
     }
 
     /// <summary>

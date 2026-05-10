@@ -29,21 +29,37 @@
             TextWrapping="Wrap"
             Text="환경 설정의 AI 공급자/API Key, 상품 데이터 준비의 카탈로그, 내 계좌 정보의 보유 상품, 매도 대상 화면의 매도 정책·실행 시점을 종합하여 AI에게 리밸런싱 제안을 받습니다." />
 
-        <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
-            <TextBlock Text="이전 회차 참고" VerticalAlignment="Center" Style="{StaticResource BodyStrongTextBlockStyle}" />
-            <ComboBox
-                x:Name="PriorSessionCombo"
-                Width="420"
-                ItemsSource="{x:Bind ViewModel.AvailableHistory, Mode=OneWay}"
-                SelectedItem="{x:Bind ViewModel.SelectedPriorEntry, Mode=TwoWay}"
-                DisplayMemberPath="DisplayLabel"
-                PlaceholderText="(선택 안 함 — 이번 회차만 참고)" />
-            <Button Content="해제" Click="ClearPriorSessionButton_Click"
-                    ToolTipService.ToolTip="이전 회차 참고 해제" />
-            <TextBlock Text="{x:Bind ViewModel.PriorSessionDescription, Mode=OneWay}"
-                       VerticalAlignment="Center"
-                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                       Style="{StaticResource CaptionTextBlockStyle}" />
+        <StackPanel Grid.Row="2" Spacing="6">
+            <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                <TextBlock Text="이전 회차 참고" VerticalAlignment="Center" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                <ComboBox
+                    x:Name="PriorSessionCombo"
+                    Width="420"
+                    ItemsSource="{x:Bind ViewModel.AvailableHistory, Mode=OneWay}"
+                    SelectedItem="{x:Bind ViewModel.SelectedPriorEntry, Mode=TwoWay}"
+                    DisplayMemberPath="DisplayLabel"
+                    PlaceholderText="(선택 안 함 — 이번 회차만 참고)" />
+                <Button Content="해제" Click="ClearPriorSessionButton_Click"
+                        ToolTipService.ToolTip="이전 회차 참고 해제" />
+                <TextBlock Text="{x:Bind ViewModel.PriorSessionDescription, Mode=OneWay}"
+                           VerticalAlignment="Center"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                           Style="{StaticResource CaptionTextBlockStyle}" />
+            </StackPanel>
+            <Border
+                Visibility="{x:Bind ViewModel.HasPriorOutcome, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}"
+                Background="#E8F0FB"
+                CornerRadius="4"
+                Padding="10,6"
+                ToolTipService.ToolTip="직전 회차의 추천 시점부터 지금까지의 실현 수익률입니다. AI에게 이 결과가 함께 전달되어 자기 추천 평가에 활용됩니다.">
+                <StackPanel Spacing="2">
+                    <TextBlock Text="{x:Bind ViewModel.PriorOutcomeHeader, Mode=OneWay}"
+                               Style="{StaticResource BodyStrongTextBlockStyle}" />
+                    <TextBlock Text="{x:Bind ViewModel.PriorOutcomeDetail, Mode=OneWay}"
+                               TextWrapping="Wrap"
+                               Style="{StaticResource CaptionTextBlockStyle}" />
+                </StackPanel>
+            </Border>
         </StackPanel>
 
         <StackPanel Grid.Row="3" Spacing="4">

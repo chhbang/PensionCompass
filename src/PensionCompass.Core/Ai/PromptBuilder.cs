@@ -9,7 +9,8 @@ public sealed record PromptInput(
     ProductCatalog? Catalog,
     AccountStatusModel Account,
     string UserAdditionalQuery,
-    RebalanceSession? PriorSession = null);
+    RebalanceSession? PriorSession = null,
+    PeriodComparison? PriorOutcome = null);
 
 public sealed record PromptOutput(string SystemPrompt, string UserPrompt);
 
@@ -39,6 +40,7 @@ public static class PromptBuilder
         AppendCatalog(sb, input.Catalog);
         AppendIrpLegalConstraints(sb);
         AppendPriorSession(sb, input.PriorSession);
+        AppendPriorOutcome(sb, input.PriorOutcome);
         AppendUserAddendum(sb, input.UserAdditionalQuery);
         AppendInstructions(sb);
         return new PromptOutput(SystemPromptText, sb.ToString().TrimEnd());
@@ -292,6 +294,65 @@ public static class PromptBuilder
         sb.AppendLine(prior.RecommendationMarkdown.TrimEnd());
         sb.AppendLine();
     }
+
+    private static void AppendPriorOutcome(StringBuilder sb, PeriodComparison? outcome)
+    {
+        if (outcome is null) return;
+
+        sb.AppendLine("## 직전 회차 → 현재 시점 실제 성과 (참고)");
+        sb.AppendLine("이전 회차 추천 시점부터 지금까지 실제로 잔고가 어떻게 움직였는지의 객관적 사실 데이터입니다. 그때의 추천이 의도한 방향대로 작동했는지 자기 평가에 활용해주세요.");
+        sb.AppendLine();
+        sb.AppendLine($"- 기간: {outcome.PriorTimestamp.ToLocalTime():yyyy년 M월 d일} → {outcome.CurrentTimestamp.ToLocalTime():yyyy년 M월 d일} (약 {outcome.DaysElapsed}일)");
+        sb.AppendLine($"- 그때 총 적립금: {Won(outcome.PriorTotal)}");
+        sb.AppendLine($"- 현재 총 적립금: {Won(outcome.CurrentTotal)}");
+        sb.AppendLine($"- 신규 입금 (기간 중): {FormatNetContribution(outcome)}");
+
+        if (outcome.PeriodReturnPercent is { } pct)
+        {
+            var label = outcome.ContributionSource switch
+            {
+                ContributionSource.DepositAmountDelta => "운용 수익률 (입금 차감 후)",
+                ContributionSource.MonthlyEstimate => "운용 수익률 (월 적립 추정 차감 후, 근사)",
+                ContributionSource.Unavailable => "기간 수익률 (입금 차감 안 됨, gross)",
+                _ => "기간 수익률",
+            };
+            var annualized = outcome.AnnualizedReturnPercent is { } ann
+                ? $" (연환산 약 {Sign(ann)}{ann:0.00}%)"
+                : string.Empty;
+            sb.AppendLine($"- {label}: {Sign(pct)}{pct:0.00}%{annualized}");
+        }
+        else
+        {
+            sb.AppendLine("- 수익률 산정 불가 (시작 잔고 0 또는 데이터 부족)");
+        }
+
+        var held = outcome.HoldingChanges.Count(h => h.Kind == HoldingChangeKind.Held);
+        var sold = outcome.HoldingChanges.Count(h => h.Kind == HoldingChangeKind.Sold);
+        var bought = outcome.HoldingChanges.Count(h => h.Kind == HoldingChangeKind.Bought);
+        sb.AppendLine($"- 보유 변동: 유지 {held}개 / 매도(또는 사라짐) {sold}개 / 신규 매수(또는 추가) {bought}개");
+        sb.AppendLine();
+
+        sb.AppendLine("이 결과를 다음 추천 작성 시 다음 관점으로 활용해주세요:");
+        sb.AppendLine("- 결과가 긍정적이고 시장 환경이 그때와 비슷하다면 큰 폭의 방향 전환은 자제하고 미세 조정 위주로 제안");
+        sb.AppendLine("- 결과가 부정적이라면 어디서 어긋났는지 (집중도? 진입 시점? 자산구분 비중?) 짚어가며 새 추천에 반영");
+        sb.AppendLine("- 짧은 기간(예: 1개월 미만)의 결과를 과대 해석하지 말 것 — 노이즈일 수 있음");
+        sb.AppendLine();
+    }
+
+    private static string FormatNetContribution(PeriodComparison o)
+    {
+        if (o.NetContribution is null)
+            return "정보 없음 (입금 데이터 부재 — 아래 수익률은 입금 차감 안 됨)";
+        var sourceNote = o.ContributionSource switch
+        {
+            ContributionSource.DepositAmountDelta => "DepositAmount 델타 기준 — 정확",
+            ContributionSource.MonthlyEstimate => "월 적립액 × 경과 기간 추정 — 근사",
+            _ => "",
+        };
+        return $"{Won(o.NetContribution.Value)} ({sourceNote})";
+    }
+
+    private static string Sign(decimal value) => value >= 0 ? "+" : "";
 
     private static void AppendUserAddendum(StringBuilder sb, string userQuery)
     {

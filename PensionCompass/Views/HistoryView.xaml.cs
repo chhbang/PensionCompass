@@ -67,8 +67,8 @@ public sealed partial class HistoryView : Page
 
     private void UseAsPriorButton_Click(object sender, RoutedEventArgs e)
     {
-        if (ViewModel.SelectedEntry is not { } entry) return;
-        AppState.Instance.PendingPriorEntry = entry;
+        if (ViewModel.SelectedEntry is not { } row) return;
+        AppState.Instance.PendingPriorEntry = row.Entry;
 
         // Navigate the parent Frame to the AI Rebalance page; that page's VM picks up the pending
         // entry on its next RefreshHistoryEntries() pass and pre-selects it in the combo.
