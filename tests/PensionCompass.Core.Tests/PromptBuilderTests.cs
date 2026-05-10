@@ -247,6 +247,45 @@ public class PromptBuilderTests
     }
 
     [Fact]
+    public void Build_AlwaysIncludesIrpLegalConstraintsSection()
+    {
+        var output = PromptBuilder.Build(new PromptInput(SampleCatalog(), SampleAccount(), ""));
+
+        Assert.Contains("## IRP 법적 제약", output.UserPrompt);
+        Assert.Contains("70%", output.UserPrompt);
+        Assert.Contains("30%", output.UserPrompt);
+    }
+
+    [Fact]
+    public void Build_PrincipalGuaranteedSection_DeclaresThemAsSafeAssets()
+    {
+        var output = PromptBuilder.Build(new PromptInput(SampleCatalog(), SampleAccount(), ""));
+
+        Assert.Contains("원리금보장형 상품은 모두 IRP 분류상 **안정자산**", output.UserPrompt);
+    }
+
+    [Fact]
+    public void Build_FundTable_IncludesAssetClassColumn()
+    {
+        var catalog = new ProductCatalog(
+            PrincipalGuaranteed: [],
+            Funds:
+            [
+                new("G04783", "고위험펀드", "운용사A", "매우높은위험",
+                    new Dictionary<ReturnPeriod, string> { [ReturnPeriod.Month3] = "30.00%" },
+                    AssetClass: "위험자산"),
+            ],
+            FundReturnPeriods: [ReturnPeriod.Month3]);
+
+        var output = PromptBuilder.Build(new PromptInput(catalog, SampleAccount(), ""));
+
+        // Header row carries the 자산구분 column.
+        Assert.Contains("자산구분", output.UserPrompt);
+        // Body row contains the actual classification value.
+        Assert.Contains("위험자산", output.UserPrompt);
+    }
+
+    [Fact]
     public void Build_NullCatalog_NotesItIsMissing()
     {
         var output = PromptBuilder.Build(new PromptInput(null, SampleAccount(), ""));

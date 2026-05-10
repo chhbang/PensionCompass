@@ -12,6 +12,7 @@
             </ResourceDictionary.MergedDictionaries>
             <converters:WonFormatConverter x:Key="WonFormatConverter" />
             <converters:BoolToVisibilityConverter x:Key="BoolToVisibilityConverter" />
+            <converters:ValidationStatusToBrushConverter x:Key="ValidationStatusToBrushConverter" />
         </ResourceDictionary>
     </Application.Resources>
 </Application>

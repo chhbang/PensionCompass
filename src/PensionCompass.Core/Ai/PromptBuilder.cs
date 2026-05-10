@@ -37,6 +37,7 @@ public static class PromptBuilder
         AppendAccountSummary(sb, input.Account);
         AppendHoldings(sb, input.Account.OwnedItems);
         AppendCatalog(sb, input.Catalog);
+        AppendIrpLegalConstraints(sb);
         AppendPriorSession(sb, input.PriorSession);
         AppendUserAddendum(sb, input.UserAdditionalQuery);
         AppendInstructions(sb);
@@ -198,6 +199,7 @@ public static class PromptBuilder
     private static void AppendPrincipalGuaranteedTable(StringBuilder sb, IReadOnlyList<PrincipalGuaranteedProduct> items)
     {
         sb.AppendLine($"### 원리금보장형 ({items.Count}개)");
+        sb.AppendLine("※ 원리금보장형 상품은 모두 IRP 분류상 **안정자산**입니다.");
         if (items.Count == 0)
         {
             sb.AppendLine("(없음)");
@@ -227,14 +229,15 @@ public static class PromptBuilder
             sb.AppendLine();
             return;
         }
-        sb.AppendLine("| 운용사 | 상품코드 | 상품명 | 위험등급 | 1개월 | 3개월 | 6개월 | 1년 | 3년 |");
-        sb.AppendLine("|---|---|---|---|---:|---:|---:|---:|---:|");
+        sb.AppendLine("| 운용사 | 상품코드 | 상품명 | 위험등급 | 자산구분 | 1개월 | 3개월 | 6개월 | 1년 | 3년 |");
+        sb.AppendLine("|---|---|---|---|---|---:|---:|---:|---:|---:|");
         foreach (var f in funds)
         {
             sb.Append("| ").Append(EscapeCell(f.AssetManager));
             sb.Append(" | ").Append(EscapeCell(f.ProductCode));
             sb.Append(" | ").Append(EscapeCell(f.ProductName));
             sb.Append(" | ").Append(EscapeCell(f.RiskGrade));
+            sb.Append(" | ").Append(EscapeCell(string.IsNullOrEmpty(f.AssetClass) ? "-" : f.AssetClass));
             sb.Append(" | ").Append(GetReturnCell(f, ReturnPeriod.Month1));
             sb.Append(" | ").Append(GetReturnCell(f, ReturnPeriod.Month3));
             sb.Append(" | ").Append(GetReturnCell(f, ReturnPeriod.Month6));
@@ -242,6 +245,22 @@ public static class PromptBuilder
             sb.Append(" | ").Append(GetReturnCell(f, ReturnPeriod.Year3));
             sb.AppendLine(" |");
         }
+        sb.AppendLine();
+    }
+
+    private static void AppendIrpLegalConstraints(StringBuilder sb)
+    {
+        sb.AppendLine("## IRP 법적 제약 (반드시 준수)");
+        sb.AppendLine("- 위험자산 합계 비중은 총 적립금의 **70%를 초과할 수 없습니다.**");
+        sb.AppendLine("- 안정자산 합계 비중은 **30% 이상**이어야 합니다.");
+        sb.AppendLine("- 자산 분류 기준:");
+        sb.AppendLine("  - **위험자산** = 위 카탈로그에서 자산구분이 \"위험자산\"으로 표시된 펀드");
+        sb.AppendLine("  - **안정자산** = 모든 원리금보장 상품 + 자산구분이 \"안정자산\"으로 표시된 펀드");
+        sb.AppendLine("  - 자산구분이 \"-\"로 표시된 펀드(분류 정보 부재)는 위험자산으로 간주하여 70% 한도 산정에 포함하세요.");
+        sb.AppendLine("- 추천한 매수 후보의 **자산구분별 비중 합계**를 응답에 명시적으로 보여주세요 — 예:");
+        sb.AppendLine("  - 위험자산 합계: ₩67,000,000 (총 적립금 대비 65.0%)");
+        sb.AppendLine("  - 안정자산 합계: ₩36,000,000 (총 적립금 대비 35.0%)");
+        sb.AppendLine("- 70/30 한도를 위반하는 추천은 삼성생명 시스템에서 거부됩니다. 한도 내에서만 제안하세요.");
         sb.AppendLine();
     }
 

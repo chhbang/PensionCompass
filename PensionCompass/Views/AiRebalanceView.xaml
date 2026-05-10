@@ -17,6 +17,7 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -89,8 +90,25 @@
             Style="{StaticResource BodyTextBlockStyle}"
             TextWrapping="Wrap" />
 
-        <HyperlinkButton
+        <Border
             Grid.Row="6"
+            Visibility="{x:Bind ViewModel.HasValidation, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}"
+            Background="{x:Bind ViewModel.ValidationStatusKey, Mode=OneWay, Converter={StaticResource ValidationStatusToBrushConverter}}"
+            CornerRadius="4"
+            Padding="12,8">
+            <StackPanel Spacing="2">
+                <TextBlock
+                    Text="{x:Bind ViewModel.ValidationDisplayHeader, Mode=OneWay}"
+                    Style="{StaticResource BodyStrongTextBlockStyle}" />
+                <TextBlock
+                    Text="{x:Bind ViewModel.ValidationDisplayMessage, Mode=OneWay}"
+                    TextWrapping="Wrap"
+                    Style="{StaticResource BodyTextBlockStyle}" />
+            </StackPanel>
+        </Border>
+
+        <HyperlinkButton
+            Grid.Row="7"
             Visibility="{x:Bind ViewModel.HasExportedPdf, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}"
             Click="OpenExportedPdfButton_Click"
             Content="{x:Bind ViewModel.LastExportedPdfPath, Mode=OneWay}"
@@ -99,7 +117,7 @@
             Padding="0,4" />
 
         <Border
-            Grid.Row="7"
+            Grid.Row="8"
             Background="White"
             CornerRadius="4"
             BorderThickness="1"

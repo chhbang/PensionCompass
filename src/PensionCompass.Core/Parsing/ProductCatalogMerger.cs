@@ -44,7 +44,8 @@ public static class ProductCatalogMerger
                 b.Source.ProductName,
                 b.Source.AssetManager,
                 b.Source.RiskGrade,
-                new Dictionary<ReturnPeriod, string>(b.Returns)))
+                new Dictionary<ReturnPeriod, string>(b.Returns),
+                b.Source.AssetClass))
             .ToList();
 
         return new ProductCatalog(

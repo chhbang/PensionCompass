@@ -71,6 +71,10 @@ public sealed class SamsungLifeHtmlParser
             {
                 var manager = ReadText(li.SelectSingleNode(".//div[contains(@class,'desc-sum')]/span[1]"));
                 var titleText = ReadText(li.SelectSingleNode(".//ul[contains(@class,'desc-list')]//li[contains(@class,'desc-item')]//div[contains(@class,'tit')]/em"));
+                // Samsung Life uses a binary encoding: an explicit "위험자산" badge marks risky funds
+                // (equity, mixed, alternative). Bond/safe funds simply omit the badge — there is no
+                // explicit "안정자산" badge on the page. So absence of the badge implies 안정자산.
+                var assetClass = badges.Any(IsRiskAssetBadge) ? "위험자산" : "안정자산";
 
                 var returns = new Dictionary<ReturnPeriod, string>();
                 if (TryExtractReturnPeriod(titleText, out var period))
@@ -84,7 +88,8 @@ public sealed class SamsungLifeHtmlParser
                     ProductName: productName,
                     AssetManager: manager,
                     RiskGrade: riskGrade,
-                    Returns: returns));
+                    Returns: returns,
+                    AssetClass: assetClass));
             }
         }
 
@@ -106,6 +111,9 @@ public sealed class SamsungLifeHtmlParser
         var text = HtmlEntity.DeEntitize(badge.InnerText).Trim();
         return string.IsNullOrEmpty(text) ? null : text;
     }
+
+    private static bool IsRiskAssetBadge(HtmlNode badge)
+        => HtmlEntity.DeEntitize(badge.InnerText).Trim() == "위험자산";
 
     private static string ReadText(HtmlNode? node)
         => node == null ? string.Empty : HtmlEntity.DeEntitize(node.InnerText).Trim();

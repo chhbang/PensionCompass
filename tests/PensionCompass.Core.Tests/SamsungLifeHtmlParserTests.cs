@@ -37,6 +37,30 @@ public class SamsungLifeHtmlParserTests
     }
 
     [Fact]
+    public void Parse_ReferenceSnapshot_FundCarriesAssetClassBadge()
+    {
+        // The 자산구분 badge sits next to the 위험등급 badge inside <p class="flag-group">.
+        // Every fund card in the reference snapshot carries one of these two values.
+        var parser = new SamsungLifeHtmlParser();
+
+        var catalog = parser.Parse(LoadReferenceHtml());
+
+        Assert.All(catalog.Funds, f =>
+        {
+            Assert.True(
+                f.AssetClass is "위험자산" or "안정자산",
+                $"펀드 {f.ProductCode}의 자산구분이 예상 외 값입니다: \"{f.AssetClass}\"");
+        });
+
+        // High-risk equity fund: must be 위험자산.
+        var highRisk = catalog.Funds.Single(f => f.ProductCode == "G04783");
+        Assert.Equal("위험자산", highRisk.AssetClass);
+
+        // The reference snapshot also contains lower-risk bond funds classified as 안정자산.
+        Assert.Contains(catalog.Funds, f => f.AssetClass == "안정자산");
+    }
+
+    [Fact]
     public void Parse_ReferenceSnapshot_FundCarriesExactlyOneReturnPeriod()
     {
         var parser = new SamsungLifeHtmlParser();

@@ -9,6 +9,7 @@ using PensionCompass.Core.Ai;
 using PensionCompass.Core.History;
 using PensionCompass.Core.Models;
 using PensionCompass.Core.Pdf;
+using PensionCompass.Core.Validation;
 using PensionCompass.Services;
 
 namespace PensionCompass.ViewModels;
@@ -55,6 +56,27 @@ public sealed partial class AiRebalanceViewModel : ObservableObject
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanSaveHistory))]
     private bool _hasSavedCurrentResponse;
+
+    /// <summary>Result of the IRP 70/30 rule check on the current AI response, or null when
+    /// no response is loaded yet. Computed automatically when <see cref="AiResponse"/> changes
+    /// via <see cref="GenerateProposalAsync"/>.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasValidation))]
+    [NotifyPropertyChangedFor(nameof(ValidationStatusKey))]
+    [NotifyPropertyChangedFor(nameof(ValidationDisplayHeader))]
+    [NotifyPropertyChangedFor(nameof(ValidationDisplayMessage))]
+    private IrpValidationResult? _validationResult;
+
+    public bool HasValidation => ValidationResult is not null;
+    public string ValidationStatusKey => ValidationResult?.Status.ToString() ?? "None";
+    public string ValidationDisplayHeader => ValidationResult?.Status switch
+    {
+        IrpValidationStatus.Compliant => "IRP 70/30 규제 준수",
+        IrpValidationStatus.Violation => "IRP 70/30 규제 위반 감지",
+        IrpValidationStatus.UnableToVerify => "IRP 70/30 자동 검증 불가",
+        _ => string.Empty,
+    };
+    public string ValidationDisplayMessage => ValidationResult?.Message ?? string.Empty;
 
     public bool HasExportedPdf => !string.IsNullOrEmpty(LastExportedPdfPath);
 
@@ -145,6 +167,7 @@ public sealed partial class AiRebalanceViewModel : ObservableObject
         // doesn't accidentally open a stale file thinking it matches the new proposal.
         LastExportedPdfPath = string.Empty;
         HasSavedCurrentResponse = false;
+        ValidationResult = null;
         try
         {
             var prompt = PromptBuilder.Build(new PromptInput(
@@ -162,6 +185,7 @@ public sealed partial class AiRebalanceViewModel : ObservableObject
             var aiRequest = new AiRequest(prompt.SystemPrompt, prompt.UserPrompt, settings.ThinkingLevel);
             var response = await client.GenerateAsync(aiRequest, cancellationToken);
             AiResponse = response;
+            ValidationResult = IrpRuleValidator.Validate(response);
             _lastResponseAt = DateTime.Now;
             StatusMessage = $"{client.ProviderName} 응답 완료. 마음에 들면 \"이력에 저장\" 버튼으로 이번 회차를 보관하세요. (저장은 선택입니다 — 다른 AI를 더 돌려보고 결정해도 됩니다.)";
         }

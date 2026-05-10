@@ -92,7 +92,8 @@ public static class CsvCatalogLoader
                 ProductName: col.Get(row, "상품명"),
                 AssetManager: col.Get(row, "운용사"),
                 RiskGrade: col.Get(row, "위험등급"),
-                Returns: returns));
+                Returns: returns,
+                AssetClass: col.Get(row, "자산구분")));
         }
 
         return (funds, foundPeriods.ToList());

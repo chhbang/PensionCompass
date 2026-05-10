@@ -69,7 +69,8 @@ public sealed class StateStore
             RiskGrade: f.RiskGrade,
             Returns: f.Returns
                 .Where(kv => Enum.TryParse<ReturnPeriod>(kv.Key, out _))
-                .ToDictionary(kv => Enum.Parse<ReturnPeriod>(kv.Key), kv => kv.Value)))
+                .ToDictionary(kv => Enum.Parse<ReturnPeriod>(kv.Key), kv => kv.Value),
+            AssetClass: f.AssetClass))
             .ToList();
 
         return new ProductCatalog(
@@ -87,7 +88,8 @@ public sealed class StateStore
                 ProductName: f.ProductName,
                 AssetManager: f.AssetManager,
                 RiskGrade: f.RiskGrade,
-                Returns: f.Returns.ToDictionary(kv => kv.Key.ToString(), kv => kv.Value))).ToList(),
+                Returns: f.Returns.ToDictionary(kv => kv.Key.ToString(), kv => kv.Value),
+                AssetClass: f.AssetClass)).ToList(),
             FundReturnPeriods: catalog.FundReturnPeriods.ToList());
         Save(CatalogFileName, dto);
     }
@@ -196,5 +198,6 @@ public sealed class StateStore
         string ProductName,
         string AssetManager,
         string RiskGrade,
-        Dictionary<string, string> Returns);
+        Dictionary<string, string> Returns,
+        string AssetClass = "");
 }

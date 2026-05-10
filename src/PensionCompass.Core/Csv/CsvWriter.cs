@@ -22,7 +22,7 @@ public static class CsvWriter
     public static void WriteFunds(string path, IEnumerable<FundProduct> funds, IReadOnlyList<ReturnPeriod> periods)
     {
         using var writer = new StreamWriter(path, append: false, Utf8WithBom);
-        var header = new List<string> { "운용사", "상품코드", "상품명", "위험등급" };
+        var header = new List<string> { "운용사", "상품코드", "상품명", "위험등급", "자산구분" };
         header.AddRange(periods.Select(p => p.ToCsvHeader()));
         WriteRow(writer, header);
 
@@ -34,6 +34,7 @@ public static class CsvWriter
                 fund.ProductCode,
                 fund.ProductName,
                 fund.RiskGrade,
+                fund.AssetClass,
             };
             row.AddRange(periods.Select(period => fund.Returns.TryGetValue(period, out var v) ? v : string.Empty));
             WriteRow(writer, row);

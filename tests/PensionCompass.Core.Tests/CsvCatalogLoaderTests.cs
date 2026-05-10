@@ -100,4 +100,42 @@ public class CsvCatalogLoaderTests : IDisposable
 
         Assert.Throws<InvalidDataException>(() => CsvCatalogLoader.LoadPrincipalGuaranteed(path));
     }
+
+    [Fact]
+    public void Load_RoundTripPreservesAssetClass()
+    {
+        var funds = new List<FundProduct>
+        {
+            new("G04783", "고위험펀드", "운용사A", "매우높은위험",
+                new Dictionary<ReturnPeriod, string> { [ReturnPeriod.Month3] = "30.00%" },
+                AssetClass: "위험자산"),
+            new("G99999", "안정형채권펀드", "운용사B", "보통위험",
+                new Dictionary<ReturnPeriod, string> { [ReturnPeriod.Year1] = "5.00%" },
+                AssetClass: "안정자산"),
+        };
+        CsvWriter.WriteFunds(Path.Combine(_tempDir, CsvCatalogLoader.FundsFileName), funds, [ReturnPeriod.Month3, ReturnPeriod.Year1]);
+
+        var loaded = CsvCatalogLoader.Load(_tempDir);
+
+        Assert.Equal("위험자산", loaded.Funds.Single(f => f.ProductCode == "G04783").AssetClass);
+        Assert.Equal("안정자산", loaded.Funds.Single(f => f.ProductCode == "G99999").AssetClass);
+    }
+
+    [Fact]
+    public void LoadFunds_LegacyCsvWithoutAssetClassColumn_DefaultsToEmpty()
+    {
+        // Hand-written legacy CSV: missing the 자산구분 column entirely. The loader must
+        // still succeed (legacy snapshots predate this column) and AssetClass should default
+        // to the empty string rather than throwing.
+        var path = Path.Combine(_tempDir, CsvCatalogLoader.FundsFileName);
+        File.WriteAllText(path,
+            "운용사,상품코드,상품명,위험등급,수익률(3개월)\r\n" +
+            "운용사A,G04783,고위험펀드,매우높은위험,30.00%\r\n");
+
+        var (funds, _) = CsvCatalogLoader.LoadFunds(path);
+
+        var fund = Assert.Single(funds);
+        Assert.Equal("고위험펀드", fund.ProductName);
+        Assert.Equal(string.Empty, fund.AssetClass);
+    }
 }

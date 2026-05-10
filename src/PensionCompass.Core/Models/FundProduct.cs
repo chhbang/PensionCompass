@@ -5,4 +5,5 @@ public sealed record FundProduct(
     string ProductName,
     string AssetManager,
     string RiskGrade,
-    IReadOnlyDictionary<ReturnPeriod, string> Returns);
+    IReadOnlyDictionary<ReturnPeriod, string> Returns,
+    string AssetClass = "");
