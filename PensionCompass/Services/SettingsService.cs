@@ -30,6 +30,8 @@ public sealed class SettingsService
     private const string GptModelKey = "GptModel";
     private const string ThinkingLevelKey = "ThinkingLevel";
     private const string SyncFolderKey = "SyncFolder";
+    private const string SyncModeKey = "SyncMode";
+    private const string GoogleDriveConnectedEmailKey = "GoogleDriveConnectedEmail";
 
     /// <summary>Single resource string for all API key entries; provider name is stored as the userName field.</summary>
     private const string VaultResource = "PensionCompass.ApiKey";
@@ -119,6 +121,33 @@ public sealed class SettingsService
     {
         get => _store.Values[SyncFolderKey] as string ?? string.Empty;
         set => _store.Values[SyncFolderKey] = value ?? string.Empty;
+    }
+
+    /// <summary>
+    /// Which sync backend is currently active. Default <see cref="SyncMode.None"/> means
+    /// LocalState only. Switching to <see cref="SyncMode.GoogleDrive"/> requires a successful
+    /// OAuth connect first; the AppState orchestrates that and only flips this setting on success.
+    /// </summary>
+    public SyncMode SyncMode
+    {
+        get => _store.Values[SyncModeKey] is string s && Enum.TryParse<SyncMode>(s, out var mode)
+            ? mode
+            // v1.0.x users with a SyncFolder configured are upgraded to FilesystemFolder mode
+            // implicitly so their existing setup keeps working.
+            : (string.IsNullOrWhiteSpace(SyncFolder) ? SyncMode.None : SyncMode.FilesystemFolder);
+        set => _store.Values[SyncModeKey] = value.ToString();
+    }
+
+    /// <summary>
+    /// Email address of the Google account currently linked for Drive sync, or empty when not
+    /// connected. Set by <see cref="AppState"/> after a successful OAuth connect; cleared on disconnect.
+    /// Used purely for UI display ("✓ user@example.com 연결됨"); the OAuth tokens themselves live
+    /// in <see cref="GoogleOAuthDataStore"/>.
+    /// </summary>
+    public string GoogleDriveConnectedEmail
+    {
+        get => _store.Values[GoogleDriveConnectedEmailKey] as string ?? string.Empty;
+        set => _store.Values[GoogleDriveConnectedEmailKey] = value ?? string.Empty;
     }
 
     /// <summary>Returns the model id configured for the currently-selected provider.</summary>

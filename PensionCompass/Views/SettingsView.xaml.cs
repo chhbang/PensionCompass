@@ -147,9 +147,53 @@ public sealed partial class SettingsView : Page
         if (folder is not null) ViewModel.SyncFolder = folder.Path;
     }
 
-    private void ClearSyncFolderButton_Click(object sender, RoutedEventArgs e)
+    private void ApplyFolderButton_Click(object sender, RoutedEventArgs e)
     {
-        ViewModel.SyncFolder = string.Empty;
+        ViewModel.ApplyFilesystemFolderMode();
+    }
+
+    private void SyncModeRadio_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        // User intent only — the radio just records which sub-section to show. None and
+        // Filesystem mode flips are applied immediately (cheap, local). Google mode requires
+        // an explicit Connect button click for the OAuth flow, so here we just flip the
+        // visible-mode marker (Settings.SyncMode) — the active provider stays Noop until
+        // the user actually clicks Connect.
+        if (sender is not RadioButtons rb) return;
+        var newMode = rb.SelectedIndex switch
+        {
+            1 => SyncMode.FilesystemFolder,
+            2 => SyncMode.GoogleDrive,
+            _ => SyncMode.None,
+        };
+        if (newMode == AppState.Instance.Settings.SyncMode) return;
+        switch (newMode)
+        {
+            case SyncMode.None:
+                ViewModel.ApplyNoneMode();
+                break;
+            case SyncMode.FilesystemFolder:
+                ViewModel.ApplyFilesystemFolderMode();
+                break;
+            case SyncMode.GoogleDrive:
+                // Persist the user's choice but keep active provider Noop; Connect button
+                // performs the OAuth + migration that flips the actual provider.
+                AppState.Instance.Settings.SyncMode = SyncMode.GoogleDrive;
+                ViewModel.RefreshSyncModeDisplay();
+                break;
+        }
+    }
+
+    private async void ConnectGoogleButton_Click(object sender, RoutedEventArgs e)
+    {
+        await ViewModel.ConnectGoogleAsync();
+        // If connect failed and mode wasn't actually applied, the radio shows Google but the
+        // active provider is None — that's reflected in the status caption ("연결 실패: ...").
+    }
+
+    private void DisconnectGoogleButton_Click(object sender, RoutedEventArgs e)
+    {
+        ViewModel.DisconnectGoogle();
     }
 
     private async System.Threading.Tasks.Task ShowErrorDialogAsync(string title, string message)

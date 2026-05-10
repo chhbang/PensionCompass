@@ -438,3 +438,6 @@ FodyWeavers.xsd
 # .appinstaller XML은 자동 업데이트 호스팅용 — 게시 URL이 들어가니 의도적으로
 # 커밋할 때만 -f로 명시적 추가하도록 차단:
 *.appinstaller
+
+# OAuth client credentials — keep out of public repo (template version IS committed)
+PensionCompass/Services/GoogleOAuthCredentials.cs

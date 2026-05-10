@@ -5,18 +5,19 @@ using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using PensionCompass.Core.Models;
+using PensionCompass.Core.Sync;
 using Windows.Storage;
 
 namespace PensionCompass.Services;
 
 /// <summary>
 /// Persists the user's account state and product catalog as JSON snapshots.
-/// Primary location is the app's per-user LocalFolder; if a sync folder is configured
-/// (see <see cref="SettingsService.SyncFolder"/>), saves are mirrored there too and loads
-/// pick whichever copy has the newer mtime — so two PCs pointed at the same cloud-backed
-/// sync folder stay in step without explicit "open file" actions.
-/// (Settings — API key, provider, thinking level — already persist via SettingsService;
-/// API keys live in PasswordVault and are never written to disk regardless of sync state.)
+/// LocalState is always the canonical local copy. A pluggable <see cref="ISyncProvider"/> handles
+/// the optional remote mirror (a user-chosen filesystem folder today; Google Drive in v1.1.0+).
+/// Loads pick whichever side has the newer modified-time so two devices pointed at the same
+/// remote stay in step without explicit "open file" actions.
+/// (Settings — API key, provider, thinking level — persist via SettingsService and live in
+/// PasswordVault / LocalSettings, never via this store.)
 /// Catalog is serialized through a DTO because the domain record uses IReadOnlyList&lt;T&gt; and
 /// Dictionary&lt;ReturnPeriod, string&gt;, neither of which round-trip cleanly through System.Text.Json defaults.
 /// </summary>
@@ -36,17 +37,19 @@ public sealed class StateStore
     };
 
     private readonly string _localFolderPath = ApplicationData.Current.LocalFolder.Path;
-    private readonly Func<string?> _syncFolderProvider;
+    private readonly Func<ISyncProvider> SyncSupplier;
 
-    /// <param name="syncFolderProvider">
-    /// Called on every save/load to look up the optional sync-folder path. Returning null
-    /// or whitespace means "LocalState only". Provider is invoked late so changes to the
-    /// SyncFolder setting take effect without restarting the app.
+    /// <param name="syncProviderSupplier">
+    /// Resolves the current mirror target on every operation, so the caller (AppState) can swap the
+    /// active provider at runtime when the user changes <see cref="SyncMode"/>. Returning
+    /// <see cref="NoopSyncProvider.Instance"/> disables mirroring (LocalState only).
     /// </param>
-    public StateStore(Func<string?>? syncFolderProvider = null)
+    public StateStore(Func<ISyncProvider>? syncProviderSupplier = null)
     {
-        _syncFolderProvider = syncFolderProvider ?? (() => null);
+        SyncSupplier = syncProviderSupplier ?? (() => NoopSyncProvider.Instance);
     }
+
+    private ISyncProvider Sync => SyncSupplier();
 
     public AccountStatusModel? LoadAccount()
         => Load<AccountStatusModel>(AccountFileName);
@@ -99,21 +102,30 @@ public sealed class StateStore
 
     private T? Load<T>(string fileName) where T : class
     {
-        // Pick whichever of LocalState / sync folder has the newer mtime. This is what makes
-        // cross-device pickup work: PC1 saves → cloud client uploads → PC2's sync folder copy
-        // becomes newer than its LocalState copy → PC2's next launch loads the cloud version.
+        // Pick whichever of LocalState / sync provider has the newer mtime. This is what makes
+        // cross-device pickup work: PC1 saves → cloud client uploads → PC2's remote copy is
+        // newer than its LocalState copy → PC2's next launch loads the remote version.
         var localPath = Path.Combine(_localFolderPath, fileName);
-        var syncPath = GetSyncFilePath(fileName);
+        var localMtime = File.Exists(localPath) ? File.GetLastWriteTimeUtc(localPath) : (DateTime?)null;
+        var remoteMtime = Sync.GetModifiedTime(fileName);
 
-        var pathToLoad = ChooseNewer(localPath, syncPath);
-        if (pathToLoad is null) return null;
+        byte[]? content = null;
+        var preferRemote = remoteMtime.HasValue && (localMtime is null || remoteMtime > localMtime);
+        if (preferRemote)
+            content = Sync.Read(fileName);
+        if (content is null && localMtime.HasValue)
+        {
+            try { content = File.ReadAllBytes(localPath); }
+            catch { /* corrupted/locked — fall through to null */ }
+        }
+
+        if (content is null) return null;
 
         try
         {
-            using var stream = File.OpenRead(pathToLoad);
-            return JsonSerializer.Deserialize<T>(stream, JsonOptions);
+            return JsonSerializer.Deserialize<T>(content, JsonOptions);
         }
-        catch (Exception)
+        catch
         {
             // Corrupted snapshot — better to start fresh than crash on launch.
             return null;
@@ -122,67 +134,52 @@ public sealed class StateStore
 
     private void Save<T>(string fileName, T value)
     {
-        // Always write LocalState as the canonical copy. The sync folder mirror is best-effort —
-        // if the cloud client's folder is offline / locked, LocalState still progresses.
-        var localPath = Path.Combine(_localFolderPath, fileName);
-        TryWrite(localPath, value);
+        // Serialize once; write LocalState first as canonical, then mirror to remote provider.
+        // Both writes are best-effort — never fail the caller's user-facing op because of disk
+        // / network flake (sync folder offline, OneDrive paused, etc.).
+        byte[] bytes;
+        try
+        {
+            bytes = JsonSerializer.SerializeToUtf8Bytes(value, JsonOptions);
+        }
+        catch
+        {
+            return;
+        }
 
-        var syncPath = GetSyncFilePath(fileName);
-        if (syncPath is not null) TryWrite(syncPath, value);
+        TryWriteLocal(Path.Combine(_localFolderPath, fileName), bytes);
+        if (Sync.IsConfigured)
+            Sync.Write(fileName, bytes);
     }
 
     private void Delete(string fileName)
     {
-        TryDelete(Path.Combine(_localFolderPath, fileName));
-        var syncPath = GetSyncFilePath(fileName);
-        if (syncPath is not null) TryDelete(syncPath);
+        TryDeleteLocal(Path.Combine(_localFolderPath, fileName));
+        if (Sync.IsConfigured)
+            Sync.Delete(fileName);
     }
 
-    /// <summary>
-    /// Returns the absolute path under the sync folder for this file, or null when the sync
-    /// folder is not configured or doesn't exist on disk. The directory is created on demand
-    /// only when actually saving — listing/loading never creates it.
-    /// </summary>
-    private string? GetSyncFilePath(string fileName)
-    {
-        var folder = _syncFolderProvider();
-        if (string.IsNullOrWhiteSpace(folder)) return null;
-        return Path.Combine(folder, fileName);
-    }
-
-    private static string? ChooseNewer(string pathA, string? pathB)
-    {
-        var aExists = File.Exists(pathA);
-        var bExists = pathB != null && File.Exists(pathB);
-        if (!aExists && !bExists) return null;
-        if (!aExists) return pathB;
-        if (!bExists) return pathA;
-        return File.GetLastWriteTimeUtc(pathA) >= File.GetLastWriteTimeUtc(pathB!) ? pathA : pathB;
-    }
-
-    private static void TryWrite<T>(string path, T value)
+    private static void TryWriteLocal(string path, byte[] bytes)
     {
         try
         {
             var dir = Path.GetDirectoryName(path);
             if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-            using var stream = File.Create(path);
-            JsonSerializer.Serialize(stream, value, JsonOptions);
+            File.WriteAllBytes(path, bytes);
         }
-        catch (Exception)
+        catch
         {
-            // Persistence is best-effort; never fail user-facing operations because of disk issues
-            // (network drive offline, OneDrive paused, permission flake, etc.).
+            // best-effort
         }
     }
 
-    private static void TryDelete(string path)
+    private static void TryDeleteLocal(string path)
     {
         try
         {
             if (File.Exists(path)) File.Delete(path);
         }
-        catch (Exception)
+        catch
         {
             // best-effort
         }
