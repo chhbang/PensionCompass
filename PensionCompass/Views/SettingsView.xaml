@@ -48,7 +48,7 @@
                     <PasswordBox Grid.Row="2" Grid.Column="1" x:Name="GptApiKeyBox" PlaceholderText="sk-..." PasswordChanged="GptApiKeyBox_PasswordChanged" />
                 </Grid>
                 <TextBlock
-                    Text="공급자마다 별도의 API Key가 저장되며, 현재 선택된 공급자의 키만 사용됩니다. API Key는 Windows 자격증명 보관소(PasswordVault)에 사용자 계정으로 암호화되어 보관됩니다. 다만 같은 사용자 세션 안에서 도는 다른 프로그램이 동일 API로 꺼내 가는 것까진 막지 못하니, 공용 PC에서는 여전히 사용을 피해주세요."
+                    Text="공급자마다 별도의 API Key가 저장되며, 현재 선택된 공급자의 키만 사용됩니다. API Key는 Windows 자격증명 보관소(PasswordVault)에 사용자 계정으로 암호화되어 보관됩니다. 다만 같은 사용자 세션 안에서 도는 다른 프로그램이 동일 API로 꺼내 가는 것까진 막지 못하니, 공용 PC에서는 여전히 사용을 피해주세요.&#10;&#10;Google 계정 연동이 활성 상태일 때는 Drive의 키(Google 계정에 묶인 키)가 자동으로 사용되며, 연결 해제 시 PC에 저장된 오프라인 키로 돌아갑니다. 두 저장소는 서로 섞이지 않습니다."
                     Style="{StaticResource CaptionTextBlockStyle}"
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                     TextWrapping="Wrap" />
@@ -164,7 +164,7 @@
                                Style="{StaticResource BodyTextBlockStyle}"
                                TextWrapping="Wrap" />
                     <TextBlock
-                        Text="앱이 사용자의 Google Drive 안의 숨겨진 앱 전용 폴더(drive.appdata)에 데이터를 보관합니다. Drive 웹 UI에는 보이지 않으며, 본 앱이 발급한 OAuth 클라이언트 ID + 본인 Google 계정 조합에서만 접근 가능합니다. 첫 연결 시 기존 로컬 데이터가 자동으로 클라우드에 한 번 업로드됩니다."
+                        Text="앱이 사용자의 Google Drive 안의 숨겨진 앱 전용 폴더(drive.appdata)에 데이터를 보관합니다. Drive 웹 UI에는 보이지 않으며, 본 앱이 발급한 OAuth 클라이언트 ID + 본인 Google 계정 조합에서만 접근 가능합니다. 첫 연결 시 기존 로컬 데이터가 자동으로 클라우드에 한 번 업로드됩니다.&#10;&#10;v1.2.0부터 API Key도 함께 Google 계정에 묶입니다 — 연결 중에는 Drive의 키가 사용·동기화되고, 연결을 해제하면 PC의 오프라인 키로 복원됩니다. Drive에 키가 없으면 위 입력란에 다시 입력해 주세요(자동으로 다른 PC들과 공유됨)."
                         Style="{StaticResource CaptionTextBlockStyle}"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         TextWrapping="Wrap" />

@@ -79,6 +79,10 @@
                 Content="종신 지급형 연금 수령 의향 (체크 시 추천 후보가 삼성생명보험 직접 운용 상품으로 제한됩니다)"
                 IsChecked="{x:Bind ViewModel.WantsLifelongAnnuity, Mode=TwoWay}" />
 
+            <CheckBox
+                Content="커버드콜 펀드 추천에서 제외 (상품명에 &quot;커버드콜&quot;이 포함된 펀드를 매수 후보에서 제거합니다. 이미 보유 중인 커버드콜 펀드의 매도·유지는 위의 매도 정책으로 따로 결정됩니다.)"
+                IsChecked="{x:Bind ViewModel.ExcludeCoveredCallFunds, Mode=TwoWay}" />
+
             <Grid ColumnSpacing="16" RowSpacing="8">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />

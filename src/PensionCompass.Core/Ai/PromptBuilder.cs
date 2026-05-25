@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using PensionCompass.Core.History;
 using PensionCompass.Core.Models;
+using PensionCompass.Core.Parsing;
 
 namespace PensionCompass.Core.Ai;
 
@@ -37,7 +38,7 @@ public static class PromptBuilder
         AppendManagerConstraintIfNeeded(sb, input.Account.WantsLifelongAnnuity);
         AppendAccountSummary(sb, input.Account);
         AppendHoldings(sb, input.Account.OwnedItems);
-        AppendCatalog(sb, input.Catalog);
+        AppendCatalog(sb, input.Catalog, input.Account.ExcludeCoveredCallFunds);
         AppendIrpLegalConstraints(sb);
         AppendPriorSession(sb, input.PriorSession);
         AppendPriorOutcome(sb, input.PriorOutcome);
@@ -184,7 +185,7 @@ public static class PromptBuilder
         sb.AppendLine();
     }
 
-    private static void AppendCatalog(StringBuilder sb, ProductCatalog? catalog)
+    private static void AppendCatalog(StringBuilder sb, ProductCatalog? catalog, bool excludeCoveredCall)
     {
         sb.AppendLine("## 매수 가능한 상품 유니버스");
         if (catalog is null || (catalog.PrincipalGuaranteed.Count == 0 && catalog.Funds.Count == 0))
@@ -195,7 +196,7 @@ public static class PromptBuilder
         }
 
         AppendPrincipalGuaranteedTable(sb, catalog.PrincipalGuaranteed);
-        AppendFundTable(sb, catalog.Funds);
+        AppendFundTable(sb, catalog.Funds, excludeCoveredCall);
     }
 
     private static void AppendPrincipalGuaranteedTable(StringBuilder sb, IReadOnlyList<PrincipalGuaranteedProduct> items)
@@ -222,10 +223,28 @@ public static class PromptBuilder
         sb.AppendLine();
     }
 
-    private static void AppendFundTable(StringBuilder sb, IReadOnlyList<FundProduct> funds)
+    private static void AppendFundTable(StringBuilder sb, IReadOnlyList<FundProduct> funds, bool excludeCoveredCall)
     {
-        sb.AppendLine($"### 펀드 ({funds.Count}개)");
-        if (funds.Count == 0)
+        // Pre-filter rather than just instructing the AI in prose: the prompt becomes shorter and
+        // there's no chance the model recommends an excluded fund because it skimmed the constraint.
+        IReadOnlyList<FundProduct> visible = funds;
+        var excludedCount = 0;
+        if (excludeCoveredCall)
+        {
+            var filtered = funds.Where(f => !CoveredCallDetector.IsCoveredCallFund(f.ProductName)).ToList();
+            excludedCount = funds.Count - filtered.Count;
+            visible = filtered;
+        }
+
+        var header = excludedCount > 0
+            ? $"### 펀드 ({visible.Count}개 — 사용자 요청에 따라 커버드콜 펀드 {excludedCount}개 제외)"
+            : $"### 펀드 ({visible.Count}개)";
+        sb.AppendLine(header);
+        if (excludedCount > 0)
+        {
+            sb.AppendLine($"※ 사용자가 커버드콜 전략 펀드를 추천 대상에서 제외하기로 선택하여, 위 카탈로그에서 {excludedCount}개를 사전 제거했습니다. 추천 매수 후보에 커버드콜 상품을 포함하지 마세요. (사용자가 이미 보유 중인 커버드콜 상품의 매도/유지는 위 보유 상품 섹션의 매도 정책으로 판단해주세요.)");
+        }
+        if (visible.Count == 0)
         {
             sb.AppendLine("(없음)");
             sb.AppendLine();
@@ -233,7 +252,7 @@ public static class PromptBuilder
         }
         sb.AppendLine("| 운용사 | 상품코드 | 상품명 | 위험등급 | 자산구분 | 1개월 | 3개월 | 6개월 | 1년 | 3년 |");
         sb.AppendLine("|---|---|---|---|---|---:|---:|---:|---:|---:|");
-        foreach (var f in funds)
+        foreach (var f in visible)
         {
             sb.Append("| ").Append(EscapeCell(f.AssetManager));
             sb.Append(" | ").Append(EscapeCell(f.ProductCode));

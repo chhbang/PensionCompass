@@ -14,6 +14,10 @@ public sealed partial class SettingsViewModel : ObservableObject
     public SettingsViewModel()
     {
         AppState.Instance.SyncProviderChanged += OnSyncProviderChanged;
+        // Fires when AppState's startup background refresh has just rewritten the cloud-cache
+        // vault slots. We only need to nudge the View — the key getters will pick up the new
+        // values on re-read.
+        AppState.Instance.Settings.ApiKeysReloadedFromCloud += OnApiKeysReloadedFromCloud;
     }
 
     private void OnSyncProviderChanged(object? sender, EventArgs e)
@@ -24,6 +28,18 @@ public sealed partial class SettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(IsGoogleConnected));
         OnPropertyChanged(nameof(GoogleConnectionStatus));
         OnPropertyChanged(nameof(SyncFolder));
+        // When the active sync source flips, ClaudeApiKey/etc. now resolve through a different
+        // vault resource (local ↔ cloud cache), so the bound PasswordBoxes need to re-read.
+        OnPropertyChanged(nameof(ClaudeApiKey));
+        OnPropertyChanged(nameof(GeminiApiKey));
+        OnPropertyChanged(nameof(GptApiKey));
+    }
+
+    private void OnApiKeysReloadedFromCloud(object? sender, EventArgs e)
+    {
+        OnPropertyChanged(nameof(ClaudeApiKey));
+        OnPropertyChanged(nameof(GeminiApiKey));
+        OnPropertyChanged(nameof(GptApiKey));
     }
 
     /// <summary>0 = Claude, 1 = Gemini, 2 = GPT.</summary>

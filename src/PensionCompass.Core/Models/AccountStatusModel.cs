@@ -34,6 +34,16 @@ public sealed class AccountStatusModel
     public bool WantsLifelongAnnuity { get; set; }
 
     /// <summary>
+    /// When true, any fund whose product name contains "커버드콜" (or "Covered Call") is removed
+    /// from the candidate universe the AI sees. Covered-call funds trade upside for premium income
+    /// and have a very different return profile from vanilla equity funds — some users prefer not
+    /// to hold them at all. Filtering happens in <see cref="Ai.PromptBuilder"/> via
+    /// <see cref="Parsing.CoveredCallDetector"/>; holdings that the user already owns are NOT
+    /// affected (the user controls sell/hold via the per-row sellable flag).
+    /// </summary>
+    public bool ExcludeCoveredCallFunds { get; set; }
+
+    /// <summary>
     /// Planned monthly DCA contribution into this IRP (₩). Null or 0 means "no ongoing contributions —
     /// rebalance the existing balance only". A positive value tells the AI it can plan with future
     /// dollar-cost-averaging in mind, e.g. tilt the current allocation slightly more toward growth assets

@@ -102,6 +102,68 @@ public class PromptBuilderTests
     }
 
     [Fact]
+    public void Build_ExcludeCoveredCallFunds_FiltersCoveredCallFromUniverse()
+    {
+        // Mix the catalog: one plain fund + two covered-call funds (Korean + English forms).
+        var catalog = new ProductCatalog(
+            PrincipalGuaranteed:
+            [
+                new("C02011", "이율보증형(3년)", "삼성생명", "3.50%", "3년"),
+            ],
+            Funds:
+            [
+                new("G04783", "[온라인전용]미래에셋코어테크증권투자신탁(주식)", "미래에셋자산운용㈜", "매우높은위험",
+                    new Dictionary<ReturnPeriod, string> { [ReturnPeriod.Month3] = "45.00%" }),
+                new("G04254", "[온라인전용]미래에셋퇴직연금배당커버드콜액티브증권자1", "미래에셋자산운용㈜", "높은위험",
+                    new Dictionary<ReturnPeriod, string> { [ReturnPeriod.Month3] = "12.50%" }),
+                new("G99999", "[온라인]가상Covered Call테스트펀드", "가상운용사", "보통위험",
+                    new Dictionary<ReturnPeriod, string> { [ReturnPeriod.Month3] = "5.00%" }),
+            ],
+            FundReturnPeriods: [ReturnPeriod.Month3]);
+
+        var account = SampleAccount();
+        account.ExcludeCoveredCallFunds = true;
+
+        var output = PromptBuilder.Build(new PromptInput(catalog, account, ""));
+
+        // Notice line appears with the excluded count.
+        Assert.Contains("커버드콜 펀드 2개 제외", output.UserPrompt);
+        Assert.Contains("사용자가 커버드콜", output.UserPrompt);
+
+        // Plain fund is still listed.
+        Assert.Contains("미래에셋코어테크증권투자신탁", output.UserPrompt);
+
+        // Covered-call funds are NOT in the catalog body — the AI literally cannot recommend them.
+        Assert.DoesNotContain("G04254", output.UserPrompt);
+        Assert.DoesNotContain("G99999", output.UserPrompt);
+    }
+
+    [Fact]
+    public void Build_ExcludeCoveredCallFundsOff_AllFundsIncluded()
+    {
+        // Same catalog as above but with the flag OFF — covered-call funds appear normally.
+        var catalog = new ProductCatalog(
+            PrincipalGuaranteed: [],
+            Funds:
+            [
+                new("G04783", "일반 펀드", "운용사1", "매우높은위험",
+                    new Dictionary<ReturnPeriod, string> { [ReturnPeriod.Month3] = "10%" }),
+                new("G04254", "[온라인]커버드콜 펀드", "운용사2", "높은위험",
+                    new Dictionary<ReturnPeriod, string> { [ReturnPeriod.Month3] = "8%" }),
+            ],
+            FundReturnPeriods: [ReturnPeriod.Month3]);
+
+        var account = SampleAccount();
+        account.ExcludeCoveredCallFunds = false;
+
+        var output = PromptBuilder.Build(new PromptInput(catalog, account, ""));
+
+        Assert.DoesNotContain("사용자 요청에 따라 커버드콜", output.UserPrompt);
+        Assert.Contains("G04254", output.UserPrompt);
+        Assert.Contains("커버드콜 펀드", output.UserPrompt); // product name shows up
+    }
+
+    [Fact]
     public void Build_SubscriberInfo_RendersAgesAndComputesYearsToStart()
     {
         var account = SampleAccount();

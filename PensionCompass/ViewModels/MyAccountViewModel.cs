@@ -102,6 +102,18 @@ public sealed partial class MyAccountViewModel : ObservableObject
         }
     }
 
+    public bool ExcludeCoveredCallFunds
+    {
+        get => Account.ExcludeCoveredCallFunds;
+        set
+        {
+            if (Account.ExcludeCoveredCallFunds == value) return;
+            Account.ExcludeCoveredCallFunds = value;
+            OnPropertyChanged();
+            AppState.Instance.SaveAccount();
+        }
+    }
+
     public double MonthlyContribution
     {
         get => Account.MonthlyContribution.HasValue ? (double)Account.MonthlyContribution.Value : 0d;
@@ -196,6 +208,7 @@ public sealed partial class MyAccountViewModel : ObservableObject
         OnPropertyChanged(nameof(CurrentAge));
         OnPropertyChanged(nameof(DesiredAnnuityStartAge));
         OnPropertyChanged(nameof(WantsLifelongAnnuity));
+        OnPropertyChanged(nameof(ExcludeCoveredCallFunds));
         OnPropertyChanged(nameof(MonthlyContribution));
         OnPropertyChanged(nameof(OtherRetirementAssets));
     }

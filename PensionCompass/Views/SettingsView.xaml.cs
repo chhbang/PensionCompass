@@ -21,6 +21,29 @@ public sealed partial class SettingsView : Page
         ClaudeApiKeyBox.Password = ViewModel.ClaudeApiKey;
         GeminiApiKeyBox.Password = ViewModel.GeminiApiKey;
         GptApiKeyBox.Password = ViewModel.GptApiKey;
+
+        // v1.2.0: when the active key source flips (Google connect/disconnect) or the startup
+        // background refresh pulls fresh values from Drive, the ViewModel raises PropertyChanged
+        // for the three ApiKey properties. PasswordBox isn't bindable, so we sync it imperatively.
+        // The equality guard prevents the user's own keystrokes from looping back (typing fires
+        // PasswordChanged → ViewModel setter → PropertyChanged → here → would re-set Password
+        // to the same value, but PasswordBox may emit a fresh PasswordChanged on re-set).
+        ViewModel.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is not (nameof(ViewModel.ClaudeApiKey)
+                                       or nameof(ViewModel.GeminiApiKey)
+                                       or nameof(ViewModel.GptApiKey)))
+                return;
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (ClaudeApiKeyBox.Password != ViewModel.ClaudeApiKey)
+                    ClaudeApiKeyBox.Password = ViewModel.ClaudeApiKey;
+                if (GeminiApiKeyBox.Password != ViewModel.GeminiApiKey)
+                    GeminiApiKeyBox.Password = ViewModel.GeminiApiKey;
+                if (GptApiKeyBox.Password != ViewModel.GptApiKey)
+                    GptApiKeyBox.Password = ViewModel.GptApiKey;
+            });
+        };
     }
 
     private void ClaudeApiKeyBox_PasswordChanged(object sender, RoutedEventArgs e)

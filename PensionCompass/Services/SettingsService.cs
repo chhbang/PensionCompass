@@ -16,6 +16,11 @@ namespace PensionCompass.Services;
 /// API keys go through <see cref="PasswordVault"/> so they're encrypted at rest by Windows
 /// (user-credential-keyed). Builds prior to v1.0.4 stored plain text in LocalSettings; the
 /// constructor sweeps any leftover plaintext entries into the vault on first launch.
+///
+/// v1.2.0 adds a SECOND vault resource ("PensionCompass.ApiKey.Cloud") that holds keys mirrored
+/// to Google Drive (drive.appdata). The active store flips based on Google connection state —
+/// see <see cref="IsGoogleSourceActive"/>. The two vault resources never cross-pollute: connecting
+/// to Google never overwrites the offline keys; disconnecting wipes only the cloud-cache slots.
 /// </summary>
 public sealed class SettingsService
 {
@@ -33,8 +38,16 @@ public sealed class SettingsService
     private const string SyncModeKey = "SyncMode";
     private const string GoogleDriveConnectedEmailKey = "GoogleDriveConnectedEmail";
 
-    /// <summary>Single resource string for all API key entries; provider name is stored as the userName field.</summary>
-    private const string VaultResource = "PensionCompass.ApiKey";
+    /// <summary>
+    /// Two parallel vault resources for API keys — see [v1.2.0 plan]:
+    /// <list type="bullet">
+    /// <item><c>VaultResourceLocal</c>: offline mode keys — read/written when Google sync is OFF or disconnected. Never uploaded.</item>
+    /// <item><c>VaultResourceCloud</c>: cached cloud keys — read/written when Google is connected. Mirrored to <c>apikeys.json</c> in drive.appdata.</item>
+    /// </list>
+    /// On Disconnect the Cloud slots are wiped so a stolen PC doesn't retain Drive-sourced keys after the user revokes elsewhere.
+    /// </summary>
+    private const string VaultResourceLocal = "PensionCompass.ApiKey";
+    private const string VaultResourceCloud = "PensionCompass.ApiKey.Cloud";
     private const string VaultProviderClaude = "Claude";
     private const string VaultProviderGemini = "Gemini";
     private const string VaultProviderGpt = "GPT";
@@ -55,20 +68,71 @@ public sealed class SettingsService
 
     public string ClaudeApiKey
     {
-        get => ReadVault(VaultProviderClaude);
-        set => WriteVault(VaultProviderClaude, value);
+        get => ReadVault(ActiveResource, VaultProviderClaude);
+        set { WriteVault(ActiveResource, VaultProviderClaude, value); RaiseApiKeysChanged(); }
     }
 
     public string GeminiApiKey
     {
-        get => ReadVault(VaultProviderGemini);
-        set => WriteVault(VaultProviderGemini, value);
+        get => ReadVault(ActiveResource, VaultProviderGemini);
+        set { WriteVault(ActiveResource, VaultProviderGemini, value); RaiseApiKeysChanged(); }
     }
 
     public string GptApiKey
     {
-        get => ReadVault(VaultProviderGpt);
-        set => WriteVault(VaultProviderGpt, value);
+        get => ReadVault(ActiveResource, VaultProviderGpt);
+        set { WriteVault(ActiveResource, VaultProviderGpt, value); RaiseApiKeysChanged(); }
+    }
+
+    /// <summary>
+    /// True when API keys should be read from / written to the cloud-cache vault slots (which mirror
+    /// Drive's <c>apikeys.json</c>). When false, the regular local-only slots are used. The Settings
+    /// UI surfaces an explanatory caption so the user understands which set is currently live.
+    /// </summary>
+    public bool IsGoogleSourceActive
+        => SyncMode == SyncMode.GoogleDrive
+           && !string.IsNullOrEmpty(GoogleDriveConnectedEmail);
+
+    private string ActiveResource => IsGoogleSourceActive ? VaultResourceCloud : VaultResourceLocal;
+
+    /// <summary>
+    /// Fires when the user changes an API key through the Settings UI (any of the <c>*ApiKey</c>
+    /// setters above). AppState subscribes to this in Google-connected mode and pushes the new
+    /// bundle up to Drive. Does NOT fire when the cache is populated from a Drive download — that
+    /// path raises <see cref="ApiKeysReloadedFromCloud"/> instead, to avoid an upload/download loop.
+    /// </summary>
+    public event EventHandler? ApiKeysChanged;
+
+    /// <summary>
+    /// Fires when a background download from Drive has refreshed the cloud-cache vault slots.
+    /// SettingsViewModel subscribes to push <c>PropertyChanged</c> at the View so PasswordBoxes
+    /// re-read the new values. Only this event — not <see cref="ApiKeysChanged"/> — is raised on
+    /// download, so AppState's UI-change handler stays silent and no upload is triggered.
+    /// </summary>
+    public event EventHandler? ApiKeysReloadedFromCloud;
+
+    private void RaiseApiKeysChanged() => ApiKeysChanged?.Invoke(this, EventArgs.Empty);
+
+    /// <summary>Called by AppState's background refresh path after writing to the Cloud slots.</summary>
+    public void NotifyApiKeysReloadedFromCloud()
+        => ApiKeysReloadedFromCloud?.Invoke(this, EventArgs.Empty);
+
+    // ──────── Cloud cache direct access (bypasses ActiveResource routing) ────────
+    // Used by AppState during connect (populate cache from Drive download) and disconnect (wipe).
+    // Reading via the regular ClaudeApiKey/etc. accessors honors ActiveResource which may not match
+    // the cache slot the caller actually wants to touch.
+
+    public void SetCloudCachedKey(string provider, string value)
+        => WriteVault(VaultResourceCloud, provider, value);
+
+    public string ReadCloudCachedKey(string provider)
+        => ReadVault(VaultResourceCloud, provider);
+
+    public void ClearAllCloudCachedKeys()
+    {
+        WriteVault(VaultResourceCloud, VaultProviderClaude, string.Empty);
+        WriteVault(VaultResourceCloud, VaultProviderGemini, string.Empty);
+        WriteVault(VaultResourceCloud, VaultProviderGpt, string.Empty);
     }
 
     /// <summary>
@@ -214,7 +278,9 @@ public sealed class SettingsService
                 continue;
             try
             {
-                WriteVault(userName, plaintext);
+                // Legacy plaintext keys were the user's OFFLINE keys (no Drive sync existed back then),
+                // so they migrate into the Local vault resource regardless of current sync mode.
+                WriteVault(VaultResourceLocal, userName, plaintext);
                 _store.Values.Remove(localKey);
             }
             catch
@@ -225,12 +291,12 @@ public sealed class SettingsService
         }
     }
 
-    private static string ReadVault(string userName)
+    private static string ReadVault(string resource, string userName)
     {
         try
         {
             var vault = new PasswordVault();
-            var credential = vault.Retrieve(VaultResource, userName);
+            var credential = vault.Retrieve(resource, userName);
             credential.RetrievePassword();
             return credential.Password ?? string.Empty;
         }
@@ -241,14 +307,14 @@ public sealed class SettingsService
         }
     }
 
-    private static void WriteVault(string userName, string value)
+    private static void WriteVault(string resource, string userName, string value)
     {
         var vault = new PasswordVault();
 
         // Remove any existing entry first so we don't duplicate or hit "already exists" semantics.
         try
         {
-            var existing = vault.Retrieve(VaultResource, userName);
+            var existing = vault.Retrieve(resource, userName);
             vault.Remove(existing);
         }
         catch { /* nothing to remove */ }
@@ -256,6 +322,6 @@ public sealed class SettingsService
         // Empty value means "clear the credential" — already removed above, nothing more to do.
         if (string.IsNullOrEmpty(value)) return;
 
-        vault.Add(new PasswordCredential(VaultResource, userName, value));
+        vault.Add(new PasswordCredential(resource, userName, value));
     }
 }

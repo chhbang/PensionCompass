@@ -34,6 +34,7 @@ public sealed partial class AppState : ObservableObject
 
     private readonly StateStore _store;
     private ISyncProvider _activeSyncProvider = NoopSyncProvider.Instance;
+    private readonly ApiKeySyncService _apiKeySync = new();
 
     /// <summary>Notifies the Settings UI to refresh the connection status block after the
     /// active provider switches (Google connect / disconnect / mode change).</summary>
@@ -53,6 +54,14 @@ public sealed partial class AppState : ObservableObject
             _catalog = persistedCatalog; // backing field directly to avoid re-saving during load
 
         MigrateLifelongAnnuityFromSettings();
+
+        // v1.2.0 API-key Google integration:
+        // - Subscribe to UI-driven key changes so we can push them to Drive.
+        // - If a Google session is already alive from a previous launch, refresh the cloud-cache
+        //   slots in the background so cross-PC edits flow through without a manual re-connect.
+        Settings.ApiKeysChanged += OnApiKeysChangedFromUi;
+        if (Settings.IsGoogleSourceActive)
+            _ = Task.Run(RefreshCloudApiKeysFromDriveInBackground);
     }
 
     public ISyncProvider ActiveSyncProvider => _activeSyncProvider;
@@ -210,6 +219,14 @@ public sealed partial class AppState : ObservableObject
         // (which the user may have populated under FilesystemFolder mode or just LocalState).
         await MigrateLocalToDriveAsync(newProvider, ct);
 
+        // v1.2.0: pull any per-account API keys the user previously stored on this Google
+        // account (from another PC, or a previous install). MUST run BEFORE SyncMode flips so
+        // that when IsGoogleSourceActive becomes true a moment later the cache is already hot
+        // and the UI shows the right values immediately instead of flashing empty boxes. If
+        // Drive has no apikeys.json yet (fresh account), this is a no-op — user enters keys
+        // manually and the OnApiKeysChangedFromUi handler uploads them.
+        PopulateCloudApiKeyCacheFrom(newProvider);
+
         // Swap providers atomically. Old provider is disposed asynchronously to drain pending writes.
         var old = _activeSyncProvider;
         _activeSyncProvider = newProvider;
@@ -225,10 +242,69 @@ public sealed partial class AppState : ObservableObject
     /// </summary>
     public void DisconnectGoogleDrive()
     {
+        // Wipe cloud-cache API key slots so a lost/stolen PC doesn't retain Drive-sourced keys
+        // after the user revokes the OAuth grant elsewhere. The local-resource slots are
+        // untouched — that's the "offline mode" key set the user reverts to.
+        Settings.ClearAllCloudCachedKeys();
         Settings.GoogleDriveConnectedEmail = string.Empty;
         // Clear cached OAuth tokens so the next connect attempt re-prompts.
         try { _ = new GoogleOAuthDataStore().ClearAsync(); } catch { /* best-effort */ }
         SwitchToNoneMode();
+    }
+
+    /// <summary>
+    /// Downloads <c>apikeys.json</c> from Drive (if it exists) and writes the three values into
+    /// the SettingsService cloud-cache vault slots. Used by:
+    /// <list type="bullet">
+    /// <item>The connect flow — once OAuth completes we pull the user's per-account keys so the
+    /// Settings UI shows them as soon as <see cref="SyncMode"/> flips to GoogleDrive.</item>
+    /// <item>The startup background refresh — picks up edits made on another PC since last launch.</item>
+    /// </list>
+    /// Returns true when a bundle was found and applied, false when Drive has no <c>apikeys.json</c>
+    /// (typical for a brand-new Google account or after a deliberate Disconnect-cleanup elsewhere).
+    /// </summary>
+    private bool PopulateCloudApiKeyCacheFrom(ISyncProvider provider)
+    {
+        var bundle = _apiKeySync.Download(provider);
+        if (bundle is null) return false;
+        Settings.SetCloudCachedKey("Claude", bundle.Claude);
+        Settings.SetCloudCachedKey("Gemini", bundle.Gemini);
+        Settings.SetCloudCachedKey("GPT", bundle.Gpt);
+        return true;
+    }
+
+    /// <summary>
+    /// Background refresh kicked off from the constructor when the app launches into an
+    /// already-connected Google session. Pulls the latest <c>apikeys.json</c> so cross-PC edits
+    /// flow through (PC1 changes key → PC2 next launch sees the change), and signals UI via
+    /// <see cref="SettingsService.NotifyApiKeysReloadedFromCloud"/>. Best-effort — network failure
+    /// just leaves the existing cache values in place.
+    /// </summary>
+    private void RefreshCloudApiKeysFromDriveInBackground()
+    {
+        try
+        {
+            if (PopulateCloudApiKeyCacheFrom(_activeSyncProvider))
+                Settings.NotifyApiKeysReloadedFromCloud();
+        }
+        catch { /* best-effort — offline / token expired etc. */ }
+    }
+
+    /// <summary>
+    /// Handler for <see cref="SettingsService.ApiKeysChanged"/> — fires when the user edits a key
+    /// via the Settings UI. In Google-connected mode we push the full 3-key bundle up to Drive
+    /// (fire-and-forget on the Drive provider's background channel). In any other mode this is a
+    /// no-op: local-only keys never touch the cloud.
+    /// </summary>
+    private void OnApiKeysChangedFromUi(object? sender, EventArgs e)
+    {
+        if (!Settings.IsGoogleSourceActive) return;
+        var bundle = new ApiKeySyncService.ApiKeyBundle(
+            Claude: Settings.ReadCloudCachedKey("Claude"),
+            Gemini: Settings.ReadCloudCachedKey("Gemini"),
+            Gpt: Settings.ReadCloudCachedKey("GPT"));
+        try { _apiKeySync.Upload(_activeSyncProvider, bundle); }
+        catch { /* upload errors surface on the provider's LastErrorMessage if needed */ }
     }
 
     /// <summary>
