@@ -139,7 +139,7 @@
                         <Button Grid.Column="2" Content="적용" Click="ApplyFolderButton_Click" />
                     </Grid>
                     <TextBlock
-                        Text="OneDrive / Google Drive 데스크톱 / Dropbox 등 클라우드 동기 폴더를 지정하면, 계좌 정보·상품 카탈로그·리밸런싱 이력이 다른 PC와 자동으로 공유됩니다. v1.1.0부터 \&quot;Google 계정 연동\&quot;을 권장하지만 폴더 방식도 호환을 위해 유지됩니다."
+                        Text="OneDrive / Google Drive 데스크톱 / Dropbox 등 클라우드 동기 폴더를 지정하면, 계좌 정보·상품 카탈로그·리밸런싱 이력이 다른 PC와 자동으로 공유됩니다. v1.1.0부터 &quot;Google 계정 연동&quot;을 권장하지만 폴더 방식도 호환을 위해 유지됩니다."
                         Style="{StaticResource CaptionTextBlockStyle}"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         TextWrapping="Wrap" />
@@ -164,10 +164,39 @@
                                Style="{StaticResource BodyTextBlockStyle}"
                                TextWrapping="Wrap" />
                     <TextBlock
-                        Text="앱이 사용자의 Google Drive 안의 숨겨진 앱 전용 폴더(drive.appdata)에 데이터를 보관합니다. Drive 웹 UI에는 보이지 않으며, 본 앱이 발급한 OAuth 클라이언트 ID + 본인 Google 계정 조합에서만 접근 가능합니다. 첫 연결 시 기존 로컬 데이터가 자동으로 클라우드에 한 번 업로드됩니다.&#10;&#10;v1.2.0부터 API Key도 함께 Google 계정에 묶입니다 — 연결 중에는 Drive의 키가 사용·동기화되고, 연결을 해제하면 PC의 오프라인 키로 복원됩니다. Drive에 키가 없으면 위 입력란에 다시 입력해 주세요(자동으로 다른 PC들과 공유됨)."
+                        Text="앱이 사용자의 Google Drive 안의 숨겨진 앱 전용 폴더(drive.appdata)에 데이터를 보관합니다. Drive 웹 UI에는 보이지 않으며, 본 앱이 발급한 OAuth 클라이언트 ID + 본인 Google 계정 조합에서만 접근 가능합니다. 첫 연결 시 기존 로컬 데이터가 자동으로 클라우드에 한 번 업로드됩니다.&#10;&#10;API Key도 Google 계정에 함께 보관할 수 있습니다. v1.3.0부터는 아래 &quot;동기화 암호구문&quot;으로 키를 암호화한 뒤에만 클라우드에 올라갑니다 — 암호구문은 이 PC에만 저장되고 클라우드로 전송되지 않습니다. 따라서 강력한 암호구문을 쓰는 한, 설령 Google 계정이 노출되더라도 키 자체는 보호됩니다(짧거나 추측하기 쉬운 암호구문은 유출된 파일로 오프라인 추측 공격을 받을 수 있습니다). 연결을 해제하면 PC의 오프라인 키로 복원됩니다."
                         Style="{StaticResource CaptionTextBlockStyle}"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         TextWrapping="Wrap" />
+
+                    <!-- v1.3.0: sync passphrase that encrypts the cloud API-key bundle -->
+                    <StackPanel Spacing="6" Margin="0,8,0,0"
+                                Visibility="{x:Bind ViewModel.ShowPassphraseSection, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
+                        <TextBlock Text="동기화 암호구문 (API 키 암호화)" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <PasswordBox Grid.Column="0" x:Name="SyncPassphraseBox" PlaceholderText="암호구문 입력 (8자 이상, 12자+ 권장)"
+                                         KeyDown="SyncPassphraseBox_KeyDown" />
+                            <Button Grid.Column="1"
+                                    Content="{x:Bind ViewModel.PassphraseButtonText, Mode=OneWay}"
+                                    Click="ApplyPassphraseButton_Click" />
+                        </Grid>
+                        <!-- Confirm box: only meaningful when SETTING a passphrase (a typo would lock the user out). -->
+                        <PasswordBox x:Name="SyncPassphraseConfirmBox" PlaceholderText="암호구문 확인 (한 번 더 입력)"
+                                     KeyDown="SyncPassphraseBox_KeyDown"
+                                     Visibility="{x:Bind ViewModel.IsSetMode, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}" />
+                        <TextBlock Text="{x:Bind ViewModel.CloudKeyStatusText, Mode=OneWay}"
+                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                   TextWrapping="Wrap" />
+                        <TextBlock Text="{x:Bind ViewModel.PassphraseMessage, Mode=OneWay}"
+                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
                 </StackPanel>
             </StackPanel>
 

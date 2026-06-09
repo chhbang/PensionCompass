@@ -52,6 +52,16 @@ public sealed class SettingsService
     private const string VaultProviderGemini = "Gemini";
     private const string VaultProviderGpt = "GPT";
 
+    /// <summary>
+    /// v1.3.0 sync passphrase (local-only). Derives the key that encrypts <c>apikeys.json</c> in
+    /// drive.appdata via <see cref="Core.Crypto.PassphraseCipher"/>. Lives ONLY in this device's vault
+    /// — it is never uploaded — so a compromised Google account can't decrypt the cloud copy. Wiped on
+    /// Disconnect alongside the cloud-cache key slots. Losing it means the cloud keys are unrecoverable
+    /// by design; the recovery path is "re-enter keys + set a new passphrase".
+    /// </summary>
+    private const string VaultResourceSyncPassphrase = "PensionCompass.SyncPassphrase";
+    private const string VaultPassphraseUser = "Passphrase";
+
     private readonly ApplicationDataContainer _store = ApplicationData.Current.LocalSettings;
 
     public SettingsService()
@@ -134,6 +144,23 @@ public sealed class SettingsService
         WriteVault(VaultResourceCloud, VaultProviderGemini, string.Empty);
         WriteVault(VaultResourceCloud, VaultProviderGpt, string.Empty);
     }
+
+    // ──────── Sync passphrase (v1.3.0 — local-only, encrypts the cloud key bundle) ────────
+
+    /// <summary>True when a sync passphrase is stored on this device.</summary>
+    public bool HasSyncPassphrase
+        => !string.IsNullOrEmpty(ReadVault(VaultResourceSyncPassphrase, VaultPassphraseUser));
+
+    /// <summary>The locally-stored sync passphrase, or empty if none. Used to encrypt/decrypt the
+    /// cloud <c>apikeys.json</c>. Never serialized anywhere but the local credential vault.</summary>
+    public string SyncPassphrase
+        => ReadVault(VaultResourceSyncPassphrase, VaultPassphraseUser);
+
+    public void SetSyncPassphrase(string passphrase)
+        => WriteVault(VaultResourceSyncPassphrase, VaultPassphraseUser, passphrase ?? string.Empty);
+
+    public void ClearSyncPassphrase()
+        => WriteVault(VaultResourceSyncPassphrase, VaultPassphraseUser, string.Empty);
 
     /// <summary>
     /// One-shot accessor for AppState's migration of the lifelong-annuity flag from LocalSettings

@@ -219,6 +219,25 @@ public sealed partial class SettingsView : Page
         ViewModel.DisconnectGoogle();
     }
 
+    private async void ApplyPassphraseButton_Click(object sender, RoutedEventArgs e)
+        => await ApplyPassphraseAsync();
+
+    // Let Enter in either passphrase box submit, so the user doesn't have to reach for the button.
+    private async void SyncPassphraseBox_KeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
+    {
+        if (e.Key != Windows.System.VirtualKey.Enter) return;
+        e.Handled = true;
+        await ApplyPassphraseAsync();
+    }
+
+    private async System.Threading.Tasks.Task ApplyPassphraseAsync()
+    {
+        await ViewModel.ApplyPassphraseAsync(SyncPassphraseBox.Password, SyncPassphraseConfirmBox.Password);
+        // Don't leave the secret sitting in the boxes after applying.
+        SyncPassphraseBox.Password = string.Empty;
+        SyncPassphraseConfirmBox.Password = string.Empty;
+    }
+
     private async System.Threading.Tasks.Task ShowErrorDialogAsync(string title, string message)
     {
         var dialog = new ContentDialog

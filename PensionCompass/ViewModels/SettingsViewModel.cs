@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
+using Microsoft.UI.Dispatching;
 using PensionCompass.Core.Ai;
 using PensionCompass.Services;
 
@@ -11,6 +12,9 @@ public sealed partial class SettingsViewModel : ObservableObject
 {
     private SettingsService Settings => AppState.Instance.Settings;
 
+    // Captured on construction (UI thread) so background events (cloud refresh) can marshal back.
+    private readonly DispatcherQueue? _dispatcher = DispatcherQueue.GetForCurrentThread();
+
     public SettingsViewModel()
     {
         AppState.Instance.SyncProviderChanged += OnSyncProviderChanged;
@@ -18,6 +22,9 @@ public sealed partial class SettingsViewModel : ObservableObject
         // vault slots. We only need to nudge the View — the key getters will pick up the new
         // values on re-read.
         AppState.Instance.Settings.ApiKeysReloadedFromCloud += OnApiKeysReloadedFromCloud;
+        // v1.3.0: cloud key encryption state (locked / needs passphrase / loaded) drives the
+        // passphrase sub-section. May fire on a background thread → marshal to the UI thread.
+        AppState.Instance.CloudKeyStatusChanged += OnCloudKeyStatusChanged;
     }
 
     private void OnSyncProviderChanged(object? sender, EventArgs e)
@@ -33,13 +40,24 @@ public sealed partial class SettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(ClaudeApiKey));
         OnPropertyChanged(nameof(GeminiApiKey));
         OnPropertyChanged(nameof(GptApiKey));
+        RefreshPassphraseDisplay();
     }
 
     private void OnApiKeysReloadedFromCloud(object? sender, EventArgs e)
+        => MarshalToUi(() =>
+        {
+            OnPropertyChanged(nameof(ClaudeApiKey));
+            OnPropertyChanged(nameof(GeminiApiKey));
+            OnPropertyChanged(nameof(GptApiKey));
+        });
+
+    private void OnCloudKeyStatusChanged(object? sender, EventArgs e)
+        => MarshalToUi(RefreshPassphraseDisplay);
+
+    private void MarshalToUi(Action action)
     {
-        OnPropertyChanged(nameof(ClaudeApiKey));
-        OnPropertyChanged(nameof(GeminiApiKey));
-        OnPropertyChanged(nameof(GptApiKey));
+        if (_dispatcher is null || _dispatcher.HasThreadAccess) action();
+        else _dispatcher.TryEnqueue(() => action());
     }
 
     /// <summary>0 = Claude, 1 = Gemini, 2 = GPT.</summary>
@@ -54,6 +72,13 @@ public sealed partial class SettingsViewModel : ObservableObject
         };
         set
         {
+            // WinUI RadioButtons transiently writes back SelectedIndex = -1 when sibling elements
+            // toggle visibility (e.g. the passphrase section appearing after an unlock). With a TwoWay
+            // binding that -1 would fall through to "Claude" and silently clobber the user's real
+            // choice — ignore any out-of-range write so only genuine user selections take effect, and
+            // re-raise PropertyChanged so the control snaps back to the real selection (else it can
+            // be left visually deselected).
+            if (value < 0 || value > 2) { OnPropertyChanged(); return; }
             var label = value switch
             {
                 0 => "Claude",
@@ -109,6 +134,9 @@ public sealed partial class SettingsViewModel : ObservableObject
         get => (int)Settings.ThinkingLevel;
         set
         {
+            // Same RadioButtons -1-writeback guard as ProviderIndex: ignore out-of-range writes so a
+            // transient re-layout glitch can't reset the user's reasoning-effort choice.
+            if (value < 0 || value > 3) { OnPropertyChanged(); return; }
             var level = (ThinkingLevel)value;
             if (Settings.ThinkingLevel == level) return;
             Settings.ThinkingLevel = level;
@@ -227,7 +255,115 @@ public sealed partial class SettingsViewModel : ObservableObject
     {
         AppState.Instance.DisconnectGoogleDrive();
         _lastGoogleError = null;
+        PassphraseMessage = string.Empty;
         OnSyncProviderChangedExternally();
+    }
+
+    // ──────── Sync passphrase (v1.3.0 — encrypts the cloud API-key bundle) ────────
+
+    /// <summary>The passphrase sub-section is only meaningful once Google is connected.</summary>
+    public bool ShowPassphraseSection => IsGoogleConnected;
+
+    /// <summary>"잠금 해제" when an encrypted bundle from another PC is waiting; otherwise "암호구문 설정".</summary>
+    public bool IsUnlockMode
+        => AppState.Instance.CloudKeys is AppState.CloudKeyStatus.NeedsPassphrase
+            or AppState.CloudKeyStatus.WrongPassphrase;
+
+    public string PassphraseButtonText => IsUnlockMode ? "잠금 해제" : "암호구문 설정/변경";
+
+    /// <summary>True when the action is SETTING a passphrase (not unlocking) — drives the "confirm
+    /// passphrase" box visibility, since confirmation only makes sense when creating one.</summary>
+    public bool IsSetMode => ShowPassphraseSection && !IsUnlockMode;
+
+    /// <summary>Explanatory line under the passphrase box, derived from the current cloud-key state.</summary>
+    public string CloudKeyStatusText
+    {
+        get
+        {
+            if (!IsGoogleConnected) return string.Empty;
+            return AppState.Instance.CloudKeys switch
+            {
+                AppState.CloudKeyStatus.Loaded
+                    => "✓ API 키가 암호구문으로 암호화되어 이 Google 계정에 동기화됩니다. (보호 강도는 암호구문의 강도에 달려 있으니 길고 추측하기 어렵게 정하세요.)",
+                AppState.CloudKeyStatus.LoadedPlaintext
+                    => "⚠ 클라우드의 API 키가 아직 암호화되지 않았습니다(이전 버전 형식). 아래에 암호구문을 설정하면 즉시 암호화됩니다.",
+                AppState.CloudKeyStatus.NeedsPassphrase
+                    => "🔒 이 Google 계정에 암호화된 API 키가 있습니다. 다른 PC에서 설정한 암호구문을 입력해 잠금을 해제하세요.",
+                AppState.CloudKeyStatus.WrongPassphrase
+                    => "⚠ 암호구문이 일치하지 않습니다. 다시 입력해 주세요.",
+                AppState.CloudKeyStatus.Corrupt
+                    => "⚠ 클라우드의 키 파일이 손상되었습니다. 위에서 API 키를 입력한 상태로 암호구문을 설정하면 그 키로 다시 만듭니다.",
+                _ => Settings.HasSyncPassphrase
+                    ? "✓ 암호구문이 설정되어 있습니다. 입력하는 API 키는 암호화되어 동기화됩니다."
+                    : "암호구문이 설정되지 않았습니다. 설정하면 API 키가 암호화되어 다른 PC와 안전하게 공유됩니다. 설정 전까지 키는 이 PC에만 저장됩니다(클라우드에 올라가지 않음). 암호구문을 잊으면 복구할 수 없으니, 잊었을 때는 키와 암호구문을 다시 설정하면 됩니다.",
+            };
+        }
+    }
+
+    [ObservableProperty]
+    private string _passphraseMessage = string.Empty;
+
+    /// <summary>Minimum length enforced when SETTING a passphrase. The cloud envelope is offline-
+    /// attackable (salt + ciphertext are downloadable), so passphrase entropy — not the KDF cost — is
+    /// the load-bearing control. 8 is the floor; the UI recommends 12+.</summary>
+    private const int MinPassphraseLength = 8;
+
+    /// <summary>
+    /// Sets a new passphrase (encrypting + uploading current keys) or unlocks an existing encrypted
+    /// bundle, depending on the cloud state. The single button covers both — see
+    /// <see cref="AppState.ApplyCloudKeyPassphraseAsync"/>. On the SET path we enforce a strength floor
+    /// and a confirmation match (a typo would silently bind an unrecoverable key); on the UNLOCK path
+    /// neither is enforced — an existing passphrase must be accepted verbatim.
+    /// </summary>
+    public async Task ApplyPassphraseAsync(string passphrase, string confirm)
+    {
+        if (string.IsNullOrEmpty(passphrase))
+        {
+            PassphraseMessage = "암호구문을 입력해 주세요.";
+            return;
+        }
+
+        // Unlock = matching an existing encrypted bundle. Setting = creating/replacing one.
+        var isSetting = !IsUnlockMode;
+        if (isSetting)
+        {
+            if (passphrase.Length < MinPassphraseLength)
+            {
+                PassphraseMessage = $"암호구문은 최소 {MinPassphraseLength}자 이상으로 정해 주세요. 이 암호구문이 노출되면 클라우드의 API 키가 복호화될 수 있으니 길고 추측하기 어렵게(12자 이상 권장) 정하는 것이 안전합니다.";
+                return;
+            }
+            if (!string.Equals(passphrase, confirm, StringComparison.Ordinal))
+            {
+                PassphraseMessage = "확인란의 암호구문이 일치하지 않습니다. 오타가 있으면 다른 PC에서 키를 풀 수 없게 되니 다시 확인해 주세요.";
+                return;
+            }
+        }
+
+        var result = await AppState.Instance.ApplyCloudKeyPassphraseAsync(passphrase).ConfigureAwait(true);
+        PassphraseMessage = result switch
+        {
+            AppState.PassphraseApplyResult.Unlocked => "✓ 잠금을 해제하고 API 키를 불러왔습니다.",
+            AppState.PassphraseApplyResult.Set => "✓ 암호구문을 설정하고 API 키를 암호화해 업로드했습니다.",
+            AppState.PassphraseApplyResult.WrongPassphrase => "⚠ 암호구문이 일치하지 않습니다.",
+            AppState.PassphraseApplyResult.CorruptNoLocalKeys => "⚠ 클라우드 키 파일이 손상되었고 이 PC에 복구할 키가 없습니다. 위에서 API 키를 먼저 입력한 뒤 다시 설정해 주세요.",
+            AppState.PassphraseApplyResult.TransientError => "⚠ 네트워크 오류로 클라우드 키를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+            AppState.PassphraseApplyResult.NotConnected => "먼저 Google 계정을 연결해 주세요.",
+            _ => string.Empty,
+        };
+        RefreshPassphraseDisplay();
+        // Unlock/Set may have repopulated the key cache → refresh the PasswordBoxes too.
+        OnPropertyChanged(nameof(ClaudeApiKey));
+        OnPropertyChanged(nameof(GeminiApiKey));
+        OnPropertyChanged(nameof(GptApiKey));
+    }
+
+    private void RefreshPassphraseDisplay()
+    {
+        OnPropertyChanged(nameof(ShowPassphraseSection));
+        OnPropertyChanged(nameof(IsUnlockMode));
+        OnPropertyChanged(nameof(IsSetMode));
+        OnPropertyChanged(nameof(PassphraseButtonText));
+        OnPropertyChanged(nameof(CloudKeyStatusText));
     }
 
     /// <summary>
@@ -244,6 +380,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(IsGoogleConnected));
         OnPropertyChanged(nameof(GoogleConnectionStatus));
         OnPropertyChanged(nameof(SyncFolder));
+        RefreshPassphraseDisplay();
     }
 
     private void OnSyncProviderChangedExternally() => RefreshSyncModeDisplay();

@@ -40,6 +40,60 @@ public sealed partial class AppState : ObservableObject
     /// active provider switches (Google connect / disconnect / mode change).</summary>
     public event EventHandler? SyncProviderChanged;
 
+    /// <summary>
+    /// State of the encrypted cloud API-key bundle (v1.3.0). Drives the Settings passphrase UI:
+    /// whether to show "locked — enter passphrase", "set a passphrase", or "✓ encrypted & synced".
+    /// </summary>
+    public enum CloudKeyStatus
+    {
+        /// <summary>Not connected, or no cloud key bundle exists yet.</summary>
+        None,
+        /// <summary>Cloud keys are decrypted (encrypted-at-rest) and loaded into the cache.</summary>
+        Loaded,
+        /// <summary>Keys were loaded from a LEGACY PLAINTEXT cloud bundle (v1.2.0). The cloud copy is NOT
+        /// yet encrypted — the user must set a passphrase to secure it. Distinct from <see cref="Loaded"/>
+        /// so the UI never falsely claims the cloud copy is encrypted.</summary>
+        LoadedPlaintext,
+        /// <summary>An encrypted bundle exists but this device has no/incorrect passphrase yet — prompt the user.</summary>
+        NeedsPassphrase,
+        /// <summary>The stored passphrase did not decrypt the cloud bundle (changed on another PC?).</summary>
+        WrongPassphrase,
+        /// <summary>The cloud bundle is structurally broken — advise reset.</summary>
+        Corrupt,
+    }
+
+    /// <summary>Result of <see cref="ApplyCloudKeyPassphraseAsync"/>.</summary>
+    public enum PassphraseApplyResult
+    {
+        /// <summary>Passphrase set and current keys encrypted+uploaded (first-time set / legacy upgrade / corrupt overwrite).</summary>
+        Set,
+        /// <summary>Existing encrypted bundle decrypted and loaded (new-PC unlock).</summary>
+        Unlocked,
+        /// <summary>Passphrase did not decrypt the existing encrypted bundle.</summary>
+        WrongPassphrase,
+        /// <summary>Cloud file is broken and there are no local keys to recreate it from — user must enter keys first.</summary>
+        CorruptNoLocalKeys,
+        /// <summary>A cloud file exists but couldn't be read (offline / token / 5xx). Aborted without writing, to avoid clobbering it.</summary>
+        TransientError,
+        /// <summary>Google isn't connected.</summary>
+        NotConnected,
+    }
+
+    private CloudKeyStatus _cloudKeyStatus = CloudKeyStatus.None;
+
+    /// <summary>Current cloud-key encryption state for the Settings UI to bind against.</summary>
+    public CloudKeyStatus CloudKeys => _cloudKeyStatus;
+
+    /// <summary>Raised whenever <see cref="CloudKeys"/> changes (may fire on a background thread —
+    /// subscribers must marshal to the UI thread before touching XAML).</summary>
+    public event EventHandler? CloudKeyStatusChanged;
+
+    private void SetCloudKeyStatus(CloudKeyStatus status)
+    {
+        _cloudKeyStatus = status;
+        CloudKeyStatusChanged?.Invoke(this, EventArgs.Empty);
+    }
+
     private AppState()
     {
         // StateStore reads through a supplier so swapping providers at runtime takes effect on
@@ -224,8 +278,10 @@ public sealed partial class AppState : ObservableObject
         // that when IsGoogleSourceActive becomes true a moment later the cache is already hot
         // and the UI shows the right values immediately instead of flashing empty boxes. If
         // Drive has no apikeys.json yet (fresh account), this is a no-op — user enters keys
-        // manually and the OnApiKeysChangedFromUi handler uploads them.
-        PopulateCloudApiKeyCacheFrom(newProvider);
+        // manually and the OnApiKeysChangedFromUi handler uploads them (once a passphrase is set).
+        // v1.3.0: the bundle is encrypted; if this PC has no passphrase yet, RefreshCloudKeyCache
+        // sets CloudKeys = NeedsPassphrase and the Settings UI prompts the user to unlock.
+        RefreshCloudKeyCache(newProvider);
 
         // Swap providers atomically. Old provider is disposed asynchronously to drain pending writes.
         var old = _activeSyncProvider;
@@ -242,35 +298,99 @@ public sealed partial class AppState : ObservableObject
     /// </summary>
     public void DisconnectGoogleDrive()
     {
-        // Wipe cloud-cache API key slots so a lost/stolen PC doesn't retain Drive-sourced keys
-        // after the user revokes the OAuth grant elsewhere. The local-resource slots are
-        // untouched — that's the "offline mode" key set the user reverts to.
+        // Wipe THIS device's cloud-cache API key slots AND the sync passphrase, so a lost/stolen PC
+        // retains neither the Drive-sourced keys nor the secret that could decrypt them. The
+        // local-resource slots are untouched — that's the "offline mode" key set the user reverts to.
+        //
+        // NOTE: the encrypted apikeys.json on Drive is INTENTIONALLY left in place — other PCs on the
+        // same Google account still rely on it, and on reconnect the user re-enters the passphrase once
+        // to unlock. It's safe to leave because it's encrypted (a strong passphrase keeps it unreadable).
+        // To purge the cloud copy entirely, the user revokes the app at myaccount.google.com/permissions.
         Settings.ClearAllCloudCachedKeys();
+        Settings.ClearSyncPassphrase();
         Settings.GoogleDriveConnectedEmail = string.Empty;
+        SetCloudKeyStatus(CloudKeyStatus.None);
         // Clear cached OAuth tokens so the next connect attempt re-prompts.
         try { _ = new GoogleOAuthDataStore().ClearAsync(); } catch { /* best-effort */ }
         SwitchToNoneMode();
     }
 
     /// <summary>
-    /// Downloads <c>apikeys.json</c> from Drive (if it exists) and writes the three values into
-    /// the SettingsService cloud-cache vault slots. Used by:
-    /// <list type="bullet">
-    /// <item>The connect flow — once OAuth completes we pull the user's per-account keys so the
-    /// Settings UI shows them as soon as <see cref="SyncMode"/> flips to GoogleDrive.</item>
-    /// <item>The startup background refresh — picks up edits made on another PC since last launch.</item>
-    /// </list>
-    /// Returns true when a bundle was found and applied, false when Drive has no <c>apikeys.json</c>
-    /// (typical for a brand-new Google account or after a deliberate Disconnect-cleanup elsewhere).
+    /// Downloads + decrypts <c>apikeys.json</c> from the provider using the locally-stored passphrase
+    /// (if any), writes the keys into the SettingsService cloud-cache vault slots, and updates
+    /// <see cref="CloudKeys"/>. Used by the connect flow and the startup background refresh. Returns
+    /// true only when keys were actually loaded into the cache.
+    ///
+    /// v1.3.0: if the cloud bundle is encrypted and this device has no/incorrect passphrase, the cache
+    /// is NOT populated and <see cref="CloudKeys"/> becomes <see cref="CloudKeyStatus.NeedsPassphrase"/>
+    /// (or <see cref="CloudKeyStatus.WrongPassphrase"/>) so the Settings UI can prompt for an unlock.
+    /// A legacy plaintext bundle (written by v1.2.0) still loads, and is opportunistically re-encrypted
+    /// on the spot when this device already has a passphrase.
     /// </summary>
-    private bool PopulateCloudApiKeyCacheFrom(ISyncProvider provider)
+    private bool RefreshCloudKeyCache(ISyncProvider provider)
     {
-        var bundle = _apiKeySync.Download(provider);
-        if (bundle is null) return false;
+        var result = _apiKeySync.Download(provider, Settings.SyncPassphrase);
+        switch (result.Status)
+        {
+            case ApiKeySyncService.DownloadStatus.Ok when result.WasEncrypted:
+                ApplyBundleToCache(result.Bundle!);
+                SetCloudKeyStatus(CloudKeyStatus.Loaded);
+                return true;
+            case ApiKeySyncService.DownloadStatus.Ok: // legacy PLAINTEXT bundle (not an encrypted envelope)
+                // SECURITY: a device that already uses encryption must NOT ingest an unauthenticated
+                // plaintext bundle — an attacker with write access to drive.appdata could plant one to
+                // strip encryption or inject their own keys (the keys end up driving the user's AI calls).
+                // Once we hold a passphrase the cloud copy should always be an encrypted envelope, so a
+                // plaintext file here is anomalous → refuse it (the encrypted local cache keys are
+                // untouched; the next key edit re-uploads an encrypted bundle).
+                if (Settings.HasSyncPassphrase)
+                {
+                    SetCloudKeyStatus(CloudKeyStatus.Corrupt);
+                    return false;
+                }
+                // Fresh device, no passphrase yet: this is the legitimate v1.2.0 → v1.3.0 upgrade path.
+                // Load the keys so the user isn't locked out, but mark the cloud copy as NOT-yet-encrypted
+                // so the UI prompts them to set a passphrase (re-encryption is user-initiated, never silent).
+                ApplyBundleToCache(result.Bundle!);
+                SetCloudKeyStatus(CloudKeyStatus.LoadedPlaintext);
+                return true;
+            case ApiKeySyncService.DownloadStatus.NotPresent:
+                SetCloudKeyStatus(CloudKeyStatus.None);
+                return false;
+            case ApiKeySyncService.DownloadStatus.EncryptedNeedsPassphrase:
+                SetCloudKeyStatus(CloudKeyStatus.NeedsPassphrase);
+                return false;
+            case ApiKeySyncService.DownloadStatus.WrongPassphrase:
+                SetCloudKeyStatus(CloudKeyStatus.WrongPassphrase);
+                return false;
+            default:
+                SetCloudKeyStatus(CloudKeyStatus.Corrupt);
+                return false;
+        }
+    }
+
+    private void ApplyBundleToCache(ApiKeySyncService.ApiKeyBundle bundle)
+    {
         Settings.SetCloudCachedKey("Claude", bundle.Claude);
         Settings.SetCloudCachedKey("Gemini", bundle.Gemini);
         Settings.SetCloudCachedKey("GPT", bundle.Gpt);
-        return true;
+    }
+
+    /// <summary>Snapshot of the three cloud-cache key slots as a bundle.</summary>
+    private ApiKeySyncService.ApiKeyBundle CurrentCloudCacheBundle()
+        => new(
+            Claude: Settings.ReadCloudCachedKey("Claude"),
+            Gemini: Settings.ReadCloudCachedKey("Gemini"),
+            Gpt: Settings.ReadCloudCachedKey("GPT"));
+
+    /// <summary>Encrypts the current cloud-cache key slots with the stored passphrase and uploads.
+    /// No-op (and safe) when no passphrase is set — that's how we keep keys local-only until the
+    /// user opts into encrypted cloud sync. Best-effort; upload failures are swallowed.</summary>
+    private void TryUploadCurrentCloudKeys(ISyncProvider provider)
+    {
+        if (!Settings.HasSyncPassphrase) return;
+        try { _apiKeySync.Upload(provider, CurrentCloudCacheBundle(), Settings.SyncPassphrase); }
+        catch { /* upload errors surface on the provider's LastErrorMessage if needed */ }
     }
 
     /// <summary>
@@ -278,13 +398,14 @@ public sealed partial class AppState : ObservableObject
     /// already-connected Google session. Pulls the latest <c>apikeys.json</c> so cross-PC edits
     /// flow through (PC1 changes key → PC2 next launch sees the change), and signals UI via
     /// <see cref="SettingsService.NotifyApiKeysReloadedFromCloud"/>. Best-effort — network failure
-    /// just leaves the existing cache values in place.
+    /// just leaves the existing cache values in place. CloudKeys is still updated so a launch into a
+    /// passphrase-locked account surfaces the unlock prompt.
     /// </summary>
     private void RefreshCloudApiKeysFromDriveInBackground()
     {
         try
         {
-            if (PopulateCloudApiKeyCacheFrom(_activeSyncProvider))
+            if (RefreshCloudKeyCache(_activeSyncProvider))
                 Settings.NotifyApiKeysReloadedFromCloud();
         }
         catch { /* best-effort — offline / token expired etc. */ }
@@ -292,19 +413,89 @@ public sealed partial class AppState : ObservableObject
 
     /// <summary>
     /// Handler for <see cref="SettingsService.ApiKeysChanged"/> — fires when the user edits a key
-    /// via the Settings UI. In Google-connected mode we push the full 3-key bundle up to Drive
-    /// (fire-and-forget on the Drive provider's background channel). In any other mode this is a
-    /// no-op: local-only keys never touch the cloud.
+    /// via the Settings UI. In Google-connected mode WITH a passphrase set, we encrypt and push the
+    /// full 3-key bundle up to Drive. Without a passphrase the keys stay in this PC's cloud-cache
+    /// vault only (never uploaded as plaintext) until the user sets one. In any non-Google mode this
+    /// is a no-op.
     /// </summary>
     private void OnApiKeysChangedFromUi(object? sender, EventArgs e)
     {
         if (!Settings.IsGoogleSourceActive) return;
-        var bundle = new ApiKeySyncService.ApiKeyBundle(
-            Claude: Settings.ReadCloudCachedKey("Claude"),
-            Gemini: Settings.ReadCloudCachedKey("Gemini"),
-            Gpt: Settings.ReadCloudCachedKey("GPT"));
-        try { _apiKeySync.Upload(_activeSyncProvider, bundle); }
-        catch { /* upload errors surface on the provider's LastErrorMessage if needed */ }
+        if (!Settings.HasSyncPassphrase) return;
+        TryUploadCurrentCloudKeys(_activeSyncProvider);
+    }
+
+    /// <summary>
+    /// Applies a passphrase entered in Settings. Two unified behaviors based on the current cloud state:
+    /// <list type="bullet">
+    /// <item><b>Unlock</b> — if an encrypted bundle exists and the passphrase decrypts it, the keys are
+    /// loaded and the passphrase is stored locally (this is the new-PC flow).</item>
+    /// <item><b>Set</b> — if no bundle exists yet, or the cloud copy is legacy plaintext, the passphrase
+    /// is stored, the current keys are encrypted and uploaded (securing any plaintext copy).</item>
+    /// </list>
+    /// A wrong passphrase against an encrypted bundle is reported without storing anything.
+    /// </summary>
+    public async Task<PassphraseApplyResult> ApplyCloudKeyPassphraseAsync(string passphrase, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(passphrase)) return PassphraseApplyResult.WrongPassphrase;
+        if (!Settings.IsGoogleSourceActive) return PassphraseApplyResult.NotConnected;
+
+        var provider = _activeSyncProvider;
+        return await Task.Run(() =>
+        {
+            var result = _apiKeySync.Download(provider, passphrase);
+            switch (result.Status)
+            {
+                case ApiKeySyncService.DownloadStatus.Ok when result.WasEncrypted:
+                    Settings.SetSyncPassphrase(passphrase);
+                    ApplyBundleToCache(result.Bundle!);
+                    SetCloudKeyStatus(CloudKeyStatus.Loaded);
+                    Settings.NotifyApiKeysReloadedFromCloud();
+                    return PassphraseApplyResult.Unlocked;
+
+                case ApiKeySyncService.DownloadStatus.WrongPassphrase:
+                    SetCloudKeyStatus(CloudKeyStatus.WrongPassphrase);
+                    return PassphraseApplyResult.WrongPassphrase;
+
+                case ApiKeySyncService.DownloadStatus.Corrupt:
+                {
+                    // The cloud file is structurally broken. Treat the passphrase entry as intent to
+                    // overwrite it — but only if we actually hold keys locally to recreate it from;
+                    // otherwise overwriting with an empty bundle would lose data, so ask the user to
+                    // enter keys first (the UI message is driven by CorruptNoLocalKeys).
+                    var localForCorrupt = CurrentCloudCacheBundle();
+                    if (localForCorrupt.IsAllEmpty)
+                    {
+                        SetCloudKeyStatus(CloudKeyStatus.Corrupt);
+                        return PassphraseApplyResult.CorruptNoLocalKeys;
+                    }
+                    Settings.SetSyncPassphrase(passphrase);
+                    try { _apiKeySync.Upload(provider, localForCorrupt, passphrase); }
+                    catch { /* best-effort; status still reflects local keys are protected */ }
+                    SetCloudKeyStatus(CloudKeyStatus.Loaded);
+                    Settings.NotifyApiKeysReloadedFromCloud();
+                    return PassphraseApplyResult.Set;
+                }
+
+                default:
+                    // NotPresent, or Ok-but-legacy-plaintext → set the passphrase and secure the keys.
+                    // GUARD: NotPresent can also mean "read transiently failed" (the Drive provider
+                    // swallows errors → null bytes). If a file actually exists, refuse to overwrite it
+                    // with whatever's in the local cache — a network blip during unlock must not destroy
+                    // the only cloud copy of the keys.
+                    if (result.Status == ApiKeySyncService.DownloadStatus.NotPresent
+                        && _apiKeySync.RemoteBundleExists(provider))
+                    {
+                        return PassphraseApplyResult.TransientError;
+                    }
+                    Settings.SetSyncPassphrase(passphrase);
+                    if (result.Bundle is not null) ApplyBundleToCache(result.Bundle); // preserve legacy keys
+                    TryUploadCurrentCloudKeys(provider);
+                    SetCloudKeyStatus(CloudKeyStatus.Loaded);
+                    Settings.NotifyApiKeysReloadedFromCloud();
+                    return PassphraseApplyResult.Set;
+            }
+        }, ct).ConfigureAwait(true);
     }
 
     /// <summary>
