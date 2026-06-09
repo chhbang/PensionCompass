@@ -131,6 +131,30 @@ public class FilesystemFolderSyncProviderTests : IDisposable
     }
 
     [Fact]
+    public void List_ReturnsOnlyFileNamesInSubfolder()
+    {
+        var provider = new FilesystemFolderSyncProvider(() => _tempDir);
+        provider.Write("History/a.json", [1]);
+        provider.Write("History/b.json", [2]);
+        provider.Write("account.json", [3]); // a different (root) location
+
+        var names = provider.List("History");
+
+        Assert.Equal(2, names.Count);
+        Assert.Contains("a.json", names);
+        Assert.Contains("b.json", names);
+        Assert.DoesNotContain("account.json", names);
+    }
+
+    [Fact]
+    public void List_MissingFolder_ReturnsEmpty()
+        => Assert.Empty(new FilesystemFolderSyncProvider(() => _tempDir).List("Nope"));
+
+    [Fact]
+    public void List_NotConfigured_ReturnsEmpty()
+        => Assert.Empty(new FilesystemFolderSyncProvider(() => null).List("History"));
+
+    [Fact]
     public void DelegateIsResolvedLazily_ChangingFolderTakesEffect()
     {
         // Caller might flip the configured folder at runtime — provider should re-resolve on

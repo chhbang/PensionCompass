@@ -44,7 +44,7 @@ public sealed class AnthropicClient : IAiClient
             ["model"] = _model,
             ["max_tokens"] = maxTokens,
             ["system"] = request.SystemPrompt,
-            ["messages"] = new[] { new { role = "user", content = request.UserPrompt } },
+            ["messages"] = new[] { new { role = "user", content = BuildUserContent(request) } },
         };
         if (budgetTokens > 0)
         {
@@ -130,6 +130,37 @@ public sealed class AnthropicClient : IAiClient
         {
             throw new AiClientException($"Anthropic 모델 목록 파싱 실패: {ex.Message}. 본문: {Truncate(json)}", ex);
         }
+    }
+
+    // Anthropic accepts inline base64 PDFs up to ~32 MB per request. base64 inflates ~33%, but the
+    // limit is on the raw document bytes, so we guard the raw total.
+    private const long MaxAttachmentBytes = 32L * 1024 * 1024;
+
+    /// <summary>
+    /// The user message content: a plain string when there are no attachments, or a content-block
+    /// array (one <c>document</c> block per PDF, then the text) when there are. Throws a clear error
+    /// if the attachments exceed the inline size budget.
+    /// </summary>
+    private static object BuildUserContent(AiRequest request)
+    {
+        if (request.Attachments.Count == 0) return request.UserPrompt;
+
+        var total = request.Attachments.Sum(a => (long)a.Content.Length);
+        if (total > MaxAttachmentBytes)
+            throw new AiClientException(
+                $"첨부 PDF 합계가 {total / 1024 / 1024}MB로 Claude 한도(32MB)를 초과합니다. 참고 자료 일부를 비활성화하거나 더 작은 파일을 사용하세요.");
+
+        var blocks = new List<object>(request.Attachments.Count + 1);
+        foreach (var a in request.Attachments)
+        {
+            blocks.Add(new
+            {
+                type = "document",
+                source = new { type = "base64", media_type = a.MediaType, data = Convert.ToBase64String(a.Content) },
+            });
+        }
+        blocks.Add(new { type = "text", text = request.UserPrompt });
+        return blocks;
     }
 
     private static (int maxTokens, int budgetTokens) MapThinking(ThinkingLevel level) => level switch

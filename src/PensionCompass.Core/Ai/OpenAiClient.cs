@@ -38,10 +38,10 @@ public sealed class OpenAiClient : IAiClient
         var body = new Dictionary<string, object?>
         {
             ["model"] = _model,
-            ["messages"] = new[]
+            ["messages"] = new List<object>
             {
                 new { role = "system", content = request.SystemPrompt },
-                new { role = "user", content = request.UserPrompt },
+                new { role = "user", content = BuildUserContent(request) },
             },
         };
         var effort = MapReasoningEffort(request.ThinkingLevel);
@@ -116,6 +116,40 @@ public sealed class OpenAiClient : IAiClient
         {
             throw new AiClientException($"OpenAI 모델 목록 파싱 실패: {ex.Message}. 본문: {Truncate(json)}", ex);
         }
+    }
+
+    // OpenAI chat completions accepts inline base64 PDFs as a `file` content block. Guard the raw total.
+    private const long MaxAttachmentBytes = 32L * 1024 * 1024;
+
+    /// <summary>
+    /// The user message content: a plain string with no attachments, or a content-block array
+    /// (one <c>file</c> block per PDF via a base64 data URL, then the text). Throws a clear error
+    /// when the attachments exceed the inline size budget.
+    /// </summary>
+    private static object BuildUserContent(AiRequest request)
+    {
+        if (request.Attachments.Count == 0) return request.UserPrompt;
+
+        var total = request.Attachments.Sum(a => (long)a.Content.Length);
+        if (total > MaxAttachmentBytes)
+            throw new AiClientException(
+                $"첨부 PDF 합계가 {total / 1024 / 1024}MB로 GPT 인라인 한도(약 32MB)를 초과합니다. 참고 자료 일부를 비활성화하거나 더 작은 파일을 사용하세요.");
+
+        var blocks = new List<object>(request.Attachments.Count + 1);
+        foreach (var a in request.Attachments)
+        {
+            blocks.Add(new
+            {
+                type = "file",
+                file = new
+                {
+                    filename = a.FileName,
+                    file_data = $"data:{a.MediaType};base64,{Convert.ToBase64String(a.Content)}",
+                },
+            });
+        }
+        blocks.Add(new { type = "text", text = request.UserPrompt });
+        return blocks;
     }
 
     private static bool IsChatLikeModel(string id)

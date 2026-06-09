@@ -42,6 +42,7 @@ public sealed partial class MainWindow : Window
             "DataPreparation" => typeof(DataPreparationView),
             "MyAccount" => typeof(MyAccountView),
             "SellTargets" => typeof(SellTargetsView),
+            "ReferenceLibrary" => typeof(ReferenceLibraryView),
             "AiRebalance" => typeof(AiRebalanceView),
             "History" => typeof(HistoryView),
             "About" => typeof(AboutView),

@@ -1,3 +1,4 @@
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 
@@ -35,6 +36,12 @@ public sealed class GeminiClient : IAiClient
         var url = $"https://generativelanguage.googleapis.com/v1beta/models/{_model}:generateContent?key={Uri.EscapeDataString(_apiKey)}";
         var httpRequest = new HttpRequestMessage(HttpMethod.Post, url);
 
+        // Attachments go through the File API (inline_data caps the whole request at 20MB, which a
+        // single 19MB PDF already blows past once base64-inflated). Upload → poll ACTIVE → reference.
+        var userParts = request.Attachments.Count > 0
+            ? await BuildPartsWithAttachmentsAsync(request, cancellationToken)
+            : new object[] { new { text = request.UserPrompt } };
+
         var body = new Dictionary<string, object?>
         {
             ["system_instruction"] = new
@@ -46,7 +53,7 @@ public sealed class GeminiClient : IAiClient
                 new
                 {
                     role = "user",
-                    parts = new[] { new { text = request.UserPrompt } },
+                    parts = userParts,
                 },
             },
         };
@@ -149,6 +156,97 @@ public sealed class GeminiClient : IAiClient
         {
             throw new AiClientException($"Gemini 모델 목록 파싱 실패: {ex.Message}. 본문: {Truncate(json)}", ex);
         }
+    }
+
+    /// <summary>Uploads each attachment via the File API and builds the user parts: one
+    /// <c>file_data</c> part per PDF, then the prompt text.</summary>
+    private async Task<object[]> BuildPartsWithAttachmentsAsync(AiRequest request, CancellationToken ct)
+    {
+        var parts = new List<object>(request.Attachments.Count + 1);
+        foreach (var a in request.Attachments)
+        {
+            var fileUri = await UploadFileAsync(a, ct);
+            parts.Add(new { file_data = new { mime_type = a.MediaType, file_uri = fileUri } });
+        }
+        parts.Add(new { text = request.UserPrompt });
+        return parts.ToArray();
+    }
+
+    /// <summary>
+    /// Resumable upload of one document to the Gemini File API, then polls until the file leaves
+    /// PROCESSING. Returns the file URI to reference in generateContent. The File API has no
+    /// practical size limit for our PDFs (2GB/file), so no size guard here — unlike the inline path.
+    /// </summary>
+    private async Task<string> UploadFileAsync(DocumentAttachment a, CancellationToken ct)
+    {
+        var startUrl = $"https://generativelanguage.googleapis.com/upload/v1beta/files?key={Uri.EscapeDataString(_apiKey)}";
+
+        // 1) Start a resumable upload session.
+        var start = new HttpRequestMessage(HttpMethod.Post, startUrl);
+        start.Headers.TryAddWithoutValidation("X-Goog-Upload-Protocol", "resumable");
+        start.Headers.TryAddWithoutValidation("X-Goog-Upload-Command", "start");
+        start.Headers.TryAddWithoutValidation("X-Goog-Upload-Header-Content-Length", a.Content.Length.ToString());
+        start.Headers.TryAddWithoutValidation("X-Goog-Upload-Header-Content-Type", a.MediaType);
+        start.Content = JsonContent.Create(new { file = new { display_name = a.FileName } });
+
+        HttpResponseMessage startResp;
+        try { startResp = await Http.SendAsync(start, ct); }
+        catch (HttpRequestException ex) { throw new AiClientException($"Gemini 파일 업로드 시작 실패: {ex.Message}", ex); }
+        if (!startResp.IsSuccessStatusCode)
+            throw new AiClientException($"Gemini 파일 업로드 시작 오류 ({(int)startResp.StatusCode}): {Truncate(await startResp.Content.ReadAsStringAsync(ct))}");
+        if (!startResp.Headers.TryGetValues("X-Goog-Upload-URL", out var uploadUrls))
+            throw new AiClientException("Gemini 파일 업로드 URL을 받지 못했습니다.");
+        var uploadUrl = uploadUrls.First();
+
+        // 2) Upload the bytes and finalize in one shot.
+        var upload = new HttpRequestMessage(HttpMethod.Post, uploadUrl);
+        upload.Headers.TryAddWithoutValidation("X-Goog-Upload-Offset", "0");
+        upload.Headers.TryAddWithoutValidation("X-Goog-Upload-Command", "upload, finalize");
+        upload.Content = new ByteArrayContent(a.Content);
+        upload.Content.Headers.ContentType = new MediaTypeHeaderValue(a.MediaType);
+
+        HttpResponseMessage uploadResp;
+        try { uploadResp = await Http.SendAsync(upload, ct); }
+        catch (HttpRequestException ex) { throw new AiClientException($"Gemini 파일 업로드 실패: {ex.Message}", ex); }
+        var uploadJson = await uploadResp.Content.ReadAsStringAsync(ct);
+        if (!uploadResp.IsSuccessStatusCode)
+            throw new AiClientException($"Gemini 파일 업로드 오류 ({(int)uploadResp.StatusCode}): {Truncate(uploadJson)}");
+
+        string fileName, fileUri, state;
+        try
+        {
+            using var doc = JsonDocument.Parse(uploadJson);
+            var file = doc.RootElement.GetProperty("file");
+            fileName = file.GetProperty("name").GetString() ?? string.Empty;
+            fileUri = file.GetProperty("uri").GetString() ?? string.Empty;
+            state = file.TryGetProperty("state", out var st) ? st.GetString() ?? string.Empty : string.Empty;
+        }
+        catch (Exception ex) when (ex is not AiClientException)
+        {
+            throw new AiClientException($"Gemini 파일 업로드 응답 파싱 실패: {ex.Message}. 본문: {Truncate(uploadJson)}", ex);
+        }
+        if (string.IsNullOrEmpty(fileUri))
+            throw new AiClientException("Gemini 파일 URI를 받지 못했습니다.");
+
+        // 3) Poll until the file is ACTIVE (small PDFs are usually ACTIVE immediately).
+        var deadline = DateTime.UtcNow + TimeSpan.FromMinutes(2);
+        while (state == "PROCESSING")
+        {
+            if (DateTime.UtcNow > deadline)
+                throw new AiClientException($"Gemini 파일 처리 대기 시간 초과: {a.FileName}");
+            await Task.Delay(2000, ct);
+            var getUrl = $"https://generativelanguage.googleapis.com/v1beta/{fileName}?key={Uri.EscapeDataString(_apiKey)}";
+            var getResp = await Http.GetAsync(getUrl, ct);
+            var getJson = await getResp.Content.ReadAsStringAsync(ct);
+            if (!getResp.IsSuccessStatusCode)
+                throw new AiClientException($"Gemini 파일 상태 조회 오류 ({(int)getResp.StatusCode}): {Truncate(getJson)}");
+            using var gdoc = JsonDocument.Parse(getJson);
+            state = gdoc.RootElement.TryGetProperty("state", out var st2) ? st2.GetString() ?? string.Empty : string.Empty;
+        }
+        if (state == "FAILED")
+            throw new AiClientException($"Gemini 파일 처리 실패: {a.FileName}");
+
+        return fileUri;
     }
 
     private static int MapThinkingBudget(ThinkingLevel level) => level switch

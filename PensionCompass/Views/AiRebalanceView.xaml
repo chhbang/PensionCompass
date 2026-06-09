@@ -70,6 +70,12 @@
                 TextWrapping="Wrap"
                 Height="100"
                 PlaceholderText="예: '이란 전쟁 상황을 반영해주세요', '안정 자산 비중을 더 높여주세요' 등" />
+            <TextBlock
+                Visibility="{x:Bind ViewModel.HasAttachedReferences, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}"
+                Text="{x:Bind ViewModel.ReferenceAttachmentNote, Mode=OneWay}"
+                Style="{StaticResource CaptionTextBlockStyle}"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                TextWrapping="Wrap" />
         </StackPanel>
 
         <StackPanel Grid.Row="4" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">

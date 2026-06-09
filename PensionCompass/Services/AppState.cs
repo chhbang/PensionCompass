@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using PensionCompass.Core.History;
+using PensionCompass.Core.Reference;
 using PensionCompass.Core.Models;
 using PensionCompass.Core.Sync;
 using PensionCompass.Core.Sync.Google;
@@ -32,9 +34,19 @@ public sealed partial class AppState : ObservableObject
 
     public SettingsService Settings { get; } = new();
 
+    /// <summary>Local library of reference PDFs (fund guides / market reports) the user attaches to
+    /// AI rebalance requests. Stored under LocalState; cloud sync of the bytes is a follow-up.</summary>
+    public Core.Reference.ReferenceLibraryService References { get; }
+        = new(ApplicationData.Current.LocalFolder.Path);
+
     private readonly StateStore _store;
     private ISyncProvider _activeSyncProvider = NoopSyncProvider.Instance;
     private readonly ApiKeySyncService _apiKeySync = new();
+    private readonly PreferenceSyncService _prefSync = new();
+
+    /// <summary>Raised after account/catalog are re-pulled from the cloud (on Google connect), so any
+    /// currently-shown screen can refresh. Fires on the UI thread (connect runs on the UI context).</summary>
+    public event EventHandler? StateReloadedFromCloud;
 
     /// <summary>Notifies the Settings UI to refresh the connection status block after the
     /// active provider switches (Google connect / disconnect / mode change).</summary>
@@ -114,6 +126,22 @@ public sealed partial class AppState : ObservableObject
         // - If a Google session is already alive from a previous launch, refresh the cloud-cache
         //   slots in the background so cross-PC edits flow through without a manual re-connect.
         Settings.ApiKeysChanged += OnApiKeysChangedFromUi;
+        // v1.3.x: mirror non-secret preferences (provider / models / thinking) too.
+        Settings.PreferencesChanged += OnPreferencesChangedFromUi;
+
+        // Startup pull of cloud preferences when already connected (account/catalog were pulled by
+        // the LoadAccount/LoadCatalog calls above, which read through the provider). Best-effort and
+        // synchronous — same as the state load — and only effective when OAuth tokens are cached.
+        if (Settings.SyncMode == SyncMode.GoogleDrive)
+        {
+            try
+            {
+                if (_prefSync.Download(_activeSyncProvider) is { } prefs)
+                    Settings.ApplyPreferences(prefs);
+            }
+            catch { /* offline / not authorized yet — connect flow will retry */ }
+        }
+
         if (Settings.IsGoogleSourceActive)
             _ = Task.Run(RefreshCloudApiKeysFromDriveInBackground);
     }
@@ -154,6 +182,153 @@ public sealed partial class AppState : ObservableObject
     {
         yield return ApplicationData.Current.LocalFolder.Path;
         if (SyncFolderRoot is { } sync) yield return sync;
+    }
+
+    // ──────── Rebalance history cloud sync (Google Drive mode) ────────
+    // In FilesystemFolder mode the OS cloud client handles the History\ folder for free; in Google
+    // Drive mode the app must mirror history files through the provider itself (StateStore only covers
+    // account/catalog). Without this, sessions saved on PC1 never reach PC2.
+
+    /// <summary>Saves a session locally and, in Google Drive mode, mirrors it to drive.appdata so
+    /// other PCs pick it up. Returns the local file path.</summary>
+    public string SaveHistory(RebalanceSession session)
+    {
+        var path = RebalanceHistoryStore.Save(ActiveHistoryFolder, session);
+        if (Settings.SyncMode == SyncMode.GoogleDrive)
+        {
+            try
+            {
+                var bytes = File.ReadAllBytes(path);
+                _activeSyncProvider.Write($"{RebalanceHistoryStore.HistoryFolderName}/{Path.GetFileName(path)}", bytes);
+            }
+            catch { /* best-effort mirror */ }
+        }
+        return path;
+    }
+
+    /// <summary>
+    /// In Google Drive mode, downloads any history sessions that exist in drive.appdata but not yet on
+    /// this PC into LocalState\History, so the local listing reflects sessions saved on other devices.
+    /// No-op in other modes. Best-effort and synchronous (the provider offloads the network calls);
+    /// only newly-seen files are fetched, so steady-state cost is a single list round-trip.
+    /// </summary>
+    public void PullCloudHistoryToLocal()
+    {
+        if (Settings.SyncMode != SyncMode.GoogleDrive) return;
+        try
+        {
+            var provider = _activeSyncProvider;
+            var localFolder = Path.Combine(ApplicationData.Current.LocalFolder.Path, RebalanceHistoryStore.HistoryFolderName);
+            var localNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (Directory.Exists(localFolder))
+                foreach (var p in Directory.EnumerateFiles(localFolder, "*.json"))
+                    localNames.Add(Path.GetFileName(p));
+
+            foreach (var name in provider.List(RebalanceHistoryStore.HistoryFolderName))
+            {
+                if (string.IsNullOrEmpty(name) || localNames.Contains(name)) continue;
+                var bytes = provider.Read($"{RebalanceHistoryStore.HistoryFolderName}/{name}");
+                if (bytes is null || bytes.Length == 0) continue;
+                Directory.CreateDirectory(localFolder);
+                File.WriteAllBytes(Path.Combine(localFolder, name), bytes);
+            }
+        }
+        catch { /* best-effort */ }
+    }
+
+    /// <summary>Deletes a history session locally and, in Google Drive mode, from the cloud too.</summary>
+    public bool DeleteHistory(string path)
+    {
+        var ok = RebalanceHistoryStore.Delete(path);
+        if (Settings.SyncMode == SyncMode.GoogleDrive)
+        {
+            try { _activeSyncProvider.Delete($"{RebalanceHistoryStore.HistoryFolderName}/{Path.GetFileName(path)}"); }
+            catch { /* best-effort */ }
+        }
+        return ok;
+    }
+
+    // ──────── Reference PDF cloud sync (opt-in per document — PDFs are large) ────────
+    private const string ReferenceCloudFolder = "References";
+
+    /// <summary>True when cloud sync is available for reference PDFs (Google connected).</summary>
+    public bool IsReferenceCloudAvailable => Settings.IsGoogleSourceActive;
+
+    /// <summary>
+    /// Sets a document's opt-in cloud-sync flag and, in Google Drive mode, performs the corresponding
+    /// upload (PDF + a metadata sidecar so other PCs know its name/category) or cloud cleanup. The
+    /// upload is best-effort/background via the provider's write queue — if the user's Drive quota is
+    /// full it simply won't appear on other PCs; the local copy is untouched.
+    /// </summary>
+    public void SetReferenceCloudSync(string id, bool cloudSync)
+    {
+        References.SetCloudSync(id, cloudSync);
+        if (Settings.SyncMode != SyncMode.GoogleDrive) return;
+        try
+        {
+            if (cloudSync)
+            {
+                var doc = References.List().FirstOrDefault(d => d.Id == id);
+                var bytes = References.ReadBytes(id);
+                if (doc is null || bytes is null) return;
+                _activeSyncProvider.Write($"{ReferenceCloudFolder}/{id}.pdf", bytes);
+                _activeSyncProvider.Write($"{ReferenceCloudFolder}/{id}.json", ReferenceLibraryService.SerializeMetadata(doc));
+            }
+            else
+            {
+                _activeSyncProvider.Delete($"{ReferenceCloudFolder}/{id}.pdf");
+                _activeSyncProvider.Delete($"{ReferenceCloudFolder}/{id}.json");
+            }
+        }
+        catch { /* best-effort */ }
+    }
+
+    /// <summary>Removes a reference document locally, and from the cloud too if it was synced.</summary>
+    public void RemoveReference(string id)
+    {
+        var wasCloud = References.List().FirstOrDefault(d => d.Id == id)?.CloudSync == true;
+        References.Remove(id);
+        if (wasCloud && Settings.SyncMode == SyncMode.GoogleDrive)
+        {
+            try
+            {
+                _activeSyncProvider.Delete($"{ReferenceCloudFolder}/{id}.pdf");
+                _activeSyncProvider.Delete($"{ReferenceCloudFolder}/{id}.json");
+            }
+            catch { /* best-effort */ }
+        }
+    }
+
+    /// <summary>
+    /// In Google Drive mode, downloads cloud reference PDFs (those another PC opted to sync) that this
+    /// device doesn't have yet. Each cloud doc is self-describing via a <c>&lt;id&gt;.json</c> sidecar.
+    /// Best-effort and synchronous; only missing docs are fetched. PDFs can be large, so this may take
+    /// a moment the first time.
+    /// </summary>
+    public void PullCloudReferencesToLocal()
+    {
+        if (Settings.SyncMode != SyncMode.GoogleDrive) return;
+        try
+        {
+            var localIds = new HashSet<string>(References.List().Select(d => d.Id), StringComparer.Ordinal);
+            foreach (var name in _activeSyncProvider.List(ReferenceCloudFolder))
+            {
+                if (name is null || !name.EndsWith(".json", StringComparison.OrdinalIgnoreCase)) continue;
+                var id = name[..^5];
+                if (localIds.Contains(id)) continue;
+
+                var metaBytes = _activeSyncProvider.Read($"{ReferenceCloudFolder}/{name}");
+                if (metaBytes is null) continue;
+                var doc = ReferenceLibraryService.DeserializeMetadata(metaBytes);
+                if (doc is null) continue;
+
+                var pdf = _activeSyncProvider.Read($"{ReferenceCloudFolder}/{id}.pdf");
+                if (pdf is null || pdf.Length == 0) continue;
+
+                References.Import(doc with { CloudSync = true }, pdf);
+            }
+        }
+        catch { /* best-effort */ }
     }
 
     private void MigrateLifelongAnnuityFromSettings()
@@ -288,7 +463,67 @@ public sealed partial class AppState : ObservableObject
         _activeSyncProvider = newProvider;
         Settings.SyncMode = SyncMode.GoogleDrive;
         DisposeProviderIfNeeded(old);
+
+        // Cloud-as-source-of-truth on connect: now that the provider is live, pull account/catalog
+        // and preferences DOWN from Drive into the running app. Without this, logging in on a fresh PC
+        // (empty LocalState) would show nothing even though the data is sitting in the cloud.
+        ReloadSyncedStateFromActiveProvider();
+        SyncPreferencesOnConnect();
+
         SyncProviderChanged?.Invoke(this, EventArgs.Empty);
+        StateReloadedFromCloud?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Re-reads account + catalog through <see cref="StateStore"/> (which now resolves to the live
+    /// Google provider and prefers the newer copy) and applies them to the in-memory state, updating
+    /// the UI. Only overwrites when the cloud/local load actually yields data, so it never blanks a
+    /// catalog the user already has.
+    /// </summary>
+    private void ReloadSyncedStateFromActiveProvider()
+    {
+        try
+        {
+            if (_store.LoadAccount() is { } account)
+            {
+                Account = account;
+                // Cache to LocalState (and mirror) so this device has the data offline next launch.
+                _store.SaveAccount(account);
+            }
+        }
+        catch { /* best-effort */ }
+
+        try
+        {
+            if (_store.LoadCatalog() is { } catalog)
+                // The generated setter notifies the UI and persists via OnCatalogChanged (LocalState + mirror).
+                Catalog = catalog;
+        }
+        catch { /* best-effort */ }
+    }
+
+    /// <summary>
+    /// On connect: if the cloud has a preferences bundle, apply it locally; otherwise seed the cloud
+    /// with this device's current preferences so other PCs pick them up.
+    /// </summary>
+    private void SyncPreferencesOnConnect()
+    {
+        try
+        {
+            if (_prefSync.Download(_activeSyncProvider) is { } prefs)
+                Settings.ApplyPreferences(prefs);
+            else
+                _prefSync.Upload(_activeSyncProvider, Settings.PreferenceSnapshot());
+        }
+        catch { /* best-effort */ }
+    }
+
+    /// <summary>Mirrors a local preference change up to Drive when Google-connected.</summary>
+    private void OnPreferencesChangedFromUi(object? sender, EventArgs e)
+    {
+        if (!Settings.IsGoogleSourceActive) return;
+        try { _prefSync.Upload(_activeSyncProvider, Settings.PreferenceSnapshot()); }
+        catch { /* best-effort */ }
     }
 
     /// <summary>

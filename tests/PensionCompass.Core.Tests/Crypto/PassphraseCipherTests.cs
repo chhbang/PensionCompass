@@ -161,11 +161,14 @@ public class PassphraseCipherTests
     [Fact]
     public void Envelope_DoesNotContainPlaintext()
     {
-        // Sanity: the secret must not leak into the envelope (e.g. via an accidental extra field).
-        var secret = "SUPER-SECRET-KEY-VALUE";
-        var envelope = PassphraseCipher.Encrypt(Bytes(secret), "pw");
+        // Sanity: neither the secret nor the passphrase may leak into the envelope. Use long,
+        // distinctive strings (with '-', which the random base64 fields can't contain as this exact
+        // run) so the check can't false-positive on an incidental short substring like "pw".
+        const string secret = "SUPER-SECRET-KEY-VALUE-DO-NOT-LEAK";
+        const string passphrase = "DISTINCTIVE-PASSPHRASE-NEVER-STORED-IN-ENVELOPE";
+        var envelope = PassphraseCipher.Encrypt(Bytes(secret), passphrase);
         var asText = Encoding.UTF8.GetString(envelope);
         Assert.DoesNotContain(secret, asText);
-        Assert.DoesNotContain("pw", asText); // passphrase never stored
+        Assert.DoesNotContain(passphrase, asText);
     }
 }

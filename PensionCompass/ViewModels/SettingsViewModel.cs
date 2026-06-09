@@ -40,6 +40,12 @@ public sealed partial class SettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(ClaudeApiKey));
         OnPropertyChanged(nameof(GeminiApiKey));
         OnPropertyChanged(nameof(GptApiKey));
+        // Connecting can also pull down synced preferences (provider / models / thinking) — re-read them.
+        OnPropertyChanged(nameof(ProviderIndex));
+        OnPropertyChanged(nameof(ClaudeModel));
+        OnPropertyChanged(nameof(GeminiModel));
+        OnPropertyChanged(nameof(GptModel));
+        OnPropertyChanged(nameof(ThinkingLevelIndex));
         RefreshPassphraseDisplay();
     }
 

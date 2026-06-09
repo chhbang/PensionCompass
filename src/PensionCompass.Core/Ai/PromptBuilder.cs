@@ -3,6 +3,7 @@ using System.Text;
 using PensionCompass.Core.History;
 using PensionCompass.Core.Models;
 using PensionCompass.Core.Parsing;
+using PensionCompass.Core.Reference;
 
 namespace PensionCompass.Core.Ai;
 
@@ -11,7 +12,8 @@ public sealed record PromptInput(
     AccountStatusModel Account,
     string UserAdditionalQuery,
     RebalanceSession? PriorSession = null,
-    PeriodComparison? PriorOutcome = null);
+    PeriodComparison? PriorOutcome = null,
+    IReadOnlyList<ReferenceDocument>? References = null);
 
 public sealed record PromptOutput(string SystemPrompt, string UserPrompt);
 
@@ -40,6 +42,7 @@ public static class PromptBuilder
         AppendHoldings(sb, input.Account.OwnedItems);
         AppendCatalog(sb, input.Catalog, input.Account.ExcludeCoveredCallFunds);
         AppendIrpLegalConstraints(sb);
+        AppendReferences(sb, input.References);
         AppendPriorSession(sb, input.PriorSession);
         AppendPriorOutcome(sb, input.PriorOutcome);
         AppendUserAddendum(sb, input.UserAdditionalQuery);
@@ -282,6 +285,26 @@ public static class PromptBuilder
         sb.AppendLine("  - 위험자산 합계: ₩67,000,000 (총 적립금 대비 65.0%)");
         sb.AppendLine("  - 안정자산 합계: ₩36,000,000 (총 적립금 대비 35.0%)");
         sb.AppendLine("- 70/30 한도를 위반하는 추천은 삼성생명 시스템에서 거부됩니다. 한도 내에서만 제안하세요.");
+        sb.AppendLine();
+    }
+
+    private static void AppendReferences(StringBuilder sb, IReadOnlyList<ReferenceDocument>? references)
+    {
+        var docs = references?.Where(d => d.Enabled).ToList();
+        if (docs is null || docs.Count == 0) return;
+
+        sb.AppendLine($"## 참고 자료 (첨부 PDF {docs.Count}개)");
+        sb.AppendLine("사용자가 아래 PDF 자료를 함께 첨부했습니다. 자료마다 성격이 다르므로 분류와 활용 지침을 명시합니다 — 각 지침에 맞게만 활용하세요.");
+        sb.AppendLine();
+        var i = 1;
+        foreach (var d in docs)
+        {
+            sb.AppendLine($"{i}. **{EscapeCell(d.FileName)}** — 분류: {d.Category.ToKoreanLabel()}");
+            sb.AppendLine($"   - {d.Category.ToLlmFraming()}");
+            i++;
+        }
+        sb.AppendLine();
+        sb.AppendLine("공통 주의: 첨부 자료는 일반 원칙·시장 환경 이해를 돕는 보조 자료입니다. 특정 운용사·종목을 편애하거나 배제하는 근거로 삼지 말고, 최종 매수·매도 결정은 위 카탈로그의 객관적 수치(수익률·보수율·자산구분)와 IRP 규제·매도 정책으로 내려주세요. 자료 내용과 카탈로그가 충돌하면 카탈로그를 우선합니다.");
         sb.AppendLine();
     }
 

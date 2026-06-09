@@ -71,6 +71,20 @@ public sealed class FilesystemFolderSyncProvider : ISyncProvider
         }
     }
 
+    public IReadOnlyList<string> List(string subfolder)
+    {
+        var dir = ResolvePath(subfolder);
+        if (dir is null || !Directory.Exists(dir)) return Array.Empty<string>();
+        try
+        {
+            return Directory.EnumerateFiles(dir).Select(p => Path.GetFileName(p)!).ToList();
+        }
+        catch
+        {
+            return Array.Empty<string>();
+        }
+    }
+
     /// <summary>
     /// Maps a logical file name (forward slashes for subdirectories) to a concrete absolute path
     /// under the configured folder. Returns null when the folder isn't configured. Forward-slash

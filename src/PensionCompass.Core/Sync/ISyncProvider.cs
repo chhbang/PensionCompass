@@ -34,4 +34,12 @@ public interface ISyncProvider
 
     /// <summary>Deletes the named file. No-op when the file doesn't exist. Best-effort like <see cref="Write"/>.</summary>
     void Delete(string fileName);
+
+    /// <summary>
+    /// Lists the bare file names (not full paths, no subdirectories) directly under the given virtual
+    /// subfolder — e.g. <c>List("History")</c> returns <c>["2026-05-10_153022_Claude.json", ...]</c>.
+    /// Returns empty when the folder doesn't exist or the provider is a no-op. Used to enumerate the
+    /// remote History folder so saved sessions sync across devices, which a per-file Read can't do.
+    /// </summary>
+    IReadOnlyList<string> List(string subfolder);
 }

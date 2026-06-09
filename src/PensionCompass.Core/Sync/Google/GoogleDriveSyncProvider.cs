@@ -75,6 +75,9 @@ public sealed class GoogleDriveSyncProvider : ISyncProvider, IAsyncDisposable
     public byte[]? Read(string fileName)
         => RunSync(() => ReadInternalAsync(fileName));
 
+    public IReadOnlyList<string> List(string subfolder)
+        => RunSync(() => ListInternalAsync(subfolder)) ?? Array.Empty<string>();
+
     public void Write(string fileName, byte[] content)
     {
         // Fire-and-forget via channel; internal worker uploads in background. We don't surface
@@ -176,6 +179,33 @@ public sealed class GoogleDriveSyncProvider : ISyncProvider, IAsyncDisposable
         return ms.ToArray();
     }
 
+    private async Task<IReadOnlyList<string>?> ListInternalAsync(string subfolder)
+    {
+        string folderId;
+        if (string.IsNullOrEmpty(subfolder))
+        {
+            folderId = AppDataFolderId;
+        }
+        else
+        {
+            var resolved = await TryResolveFolderIdAsync(subfolder).ConfigureAwait(false);
+            if (resolved is null) return Array.Empty<string>(); // folder doesn't exist yet → no files
+            folderId = resolved;
+        }
+
+        var drive = await EnsureDriveAsync().ConfigureAwait(false);
+        var req = drive.Files.List();
+        req.Spaces = "appDataFolder";
+        req.Q = $"'{folderId}' in parents and trashed = false and mimeType != '{FolderMimeType}'";
+        req.Fields = "files(name)";
+        req.PageSize = 1000;
+        var result = await req.ExecuteAsync().ConfigureAwait(false);
+        return result.Files?
+            .Select(f => f.Name)
+            .Where(n => !string.IsNullOrEmpty(n))
+            .ToList() ?? (IReadOnlyList<string>)Array.Empty<string>();
+    }
+
     private async Task ProcessWriteQueueAsync()
     {
         try
@@ -261,7 +291,8 @@ public sealed class GoogleDriveSyncProvider : ISyncProvider, IAsyncDisposable
         return found?.Id;
     }
 
-    private async Task<string> ResolveOrCreateFolderIdAsync(string folderName)
+    /// <summary>Looks up a subfolder's id without creating it; null when it doesn't exist yet.</summary>
+    private async Task<string?> TryResolveFolderIdAsync(string folderName)
     {
         if (_folderIdCache.TryGetValue(folderName, out var cached)) return cached;
         var drive = await EnsureDriveAsync().ConfigureAwait(false);
@@ -273,12 +304,16 @@ public sealed class GoogleDriveSyncProvider : ISyncProvider, IAsyncDisposable
         var result = await req.ExecuteAsync().ConfigureAwait(false);
 
         var existing = result.Files?.FirstOrDefault();
-        if (existing is not null)
-        {
-            _folderIdCache[folderName] = existing.Id;
-            return existing.Id;
-        }
+        if (existing is not null) _folderIdCache[folderName] = existing.Id;
+        return existing?.Id;
+    }
 
+    private async Task<string> ResolveOrCreateFolderIdAsync(string folderName)
+    {
+        if (await TryResolveFolderIdAsync(folderName).ConfigureAwait(false) is { } existing)
+            return existing;
+
+        var drive = await EnsureDriveAsync().ConfigureAwait(false);
         var meta = new DriveFile
         {
             Name = folderName,

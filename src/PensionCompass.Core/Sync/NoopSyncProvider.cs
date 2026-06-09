@@ -14,4 +14,5 @@ public sealed class NoopSyncProvider : ISyncProvider
     public byte[]? Read(string fileName) => null;
     public void Write(string fileName, byte[] content) { }
     public void Delete(string fileName) { }
+    public IReadOnlyList<string> List(string subfolder) => Array.Empty<string>();
 }

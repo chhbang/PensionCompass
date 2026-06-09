@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="PensionCompass.Views.ReferenceLibraryView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:vm="using:PensionCompass.ViewModels"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Loaded="Page_Loaded">
+
+    <ScrollViewer Padding="32">
+        <StackPanel Spacing="20" MaxWidth="860" HorizontalAlignment="Left">
+            <TextBlock Text="참고 자료 (PDF)" Style="{StaticResource TitleTextBlockStyle}" />
+
+            <TextBlock
+                Style="{StaticResource BodyTextBlockStyle}"
+                TextWrapping="Wrap"
+                Text="자산운용사 펀드/ETF 가이드, 증권사 시장 분석 리포트 같은 PDF를 등록해 두면, AI 리밸런싱 요청 시 함께 전달되어 더 풍부한 맥락으로 제안을 받을 수 있습니다. 자료마다 성격이 다르므로 분류를 지정하면 그 용도가 AI에게 함께 전달됩니다(예: 가이드는 상품 이해용, 리포트는 시장 환경 판단용). 분류와 무관하게, 특정 운용사·종목을 편애하지 말라는 안내도 함께 전달됩니다." />
+
+            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Bottom">
+                <ComboBox Header="추가할 자료의 분류"
+                          Width="200"
+                          SelectedIndex="{x:Bind ViewModel.NewCategoryIndex, Mode=TwoWay}">
+                    <x:String>펀드/ETF 가이드</x:String>
+                    <x:String>시장 분석 리포트</x:String>
+                    <x:String>기타</x:String>
+                </ComboBox>
+                <Button Content="PDF 추가"
+                        Click="AddButton_Click"
+                        Style="{StaticResource AccentButtonStyle}"
+                        VerticalAlignment="Bottom" />
+            </StackPanel>
+
+            <TextBlock Text="{x:Bind ViewModel.SummaryText, Mode=OneWay}"
+                       Style="{StaticResource CaptionTextBlockStyle}"
+                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                       TextWrapping="Wrap" />
+
+            <TextBlock Text="{x:Bind ViewModel.CloudCaption, Mode=OneWay}"
+                       Style="{StaticResource CaptionTextBlockStyle}"
+                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                       TextWrapping="Wrap" />
+
+            <ListView ItemsSource="{x:Bind ViewModel.Documents}"
+                      SelectionMode="None"
+                      BorderThickness="1"
+                      BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                      CornerRadius="6">
+                <ListView.ItemTemplate>
+                    <DataTemplate x:DataType="vm:ReferenceRowViewModel">
+                        <Grid ColumnSpacing="12" Padding="4,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="190" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                <TextBlock Text="{x:Bind FileName}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Text="{x:Bind AddedText}"
+                                           Style="{StaticResource CaptionTextBlockStyle}"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            </StackPanel>
+
+                            <TextBlock Grid.Column="1" Text="{x:Bind SizeText}" VerticalAlignment="Center"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+
+                            <ComboBox Grid.Column="2" VerticalAlignment="Center" HorizontalAlignment="Stretch"
+                                      SelectedIndex="{x:Bind CategoryIndex, Mode=TwoWay}">
+                                <x:String>펀드/ETF 가이드</x:String>
+                                <x:String>시장 분석 리포트</x:String>
+                                <x:String>기타</x:String>
+                            </ComboBox>
+
+                            <CheckBox Grid.Column="3" Content="AI에 첨부" VerticalAlignment="Center"
+                                      IsChecked="{x:Bind Enabled, Mode=TwoWay}" />
+
+                            <CheckBox Grid.Column="4" Content="클라우드" VerticalAlignment="Center"
+                                      IsChecked="{x:Bind CloudSync, Mode=TwoWay}"
+                                      IsEnabled="{x:Bind CloudAvailable}"
+                                      ToolTipService.ToolTip="켜면 이 PDF가 Google Drive(앱 전용 폴더)에 저장되어 다른 PC와 공유됩니다. 저장공간을 사용합니다." />
+
+                            <Button Grid.Column="5" VerticalAlignment="Center"
+                                    Click="DeleteButton_Click"
+                                    ToolTipService.ToolTip="삭제">
+                                <SymbolIcon Symbol="Delete" />
+                            </Button>
+                        </Grid>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

@@ -188,5 +188,15 @@ public class ApiKeySyncServiceTests
             => _store[fileName] = (content, DateTime.UtcNow);
 
         public void Delete(string fileName) => _store.Remove(fileName);
+
+        public IReadOnlyList<string> List(string subfolder)
+        {
+            var prefix = subfolder + "/";
+            var names = new List<string>();
+            foreach (var k in _store.Keys)
+                if (k.StartsWith(prefix, StringComparison.Ordinal))
+                    names.Add(k.Substring(prefix.Length));
+            return names;
+        }
     }
 }

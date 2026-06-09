@@ -43,6 +43,11 @@
                         <SymbolIcon Symbol="Edit" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
+                <NavigationViewItem Tag="ReferenceLibrary" Content="참고 자료 (PDF)">
+                    <NavigationViewItem.Icon>
+                        <SymbolIcon Symbol="Attach" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
                 <NavigationViewItem Tag="AiRebalance" Content="AI 포트폴리오 리밸런싱">
                     <NavigationViewItem.Icon>
                         <SymbolIcon Symbol="Target" />

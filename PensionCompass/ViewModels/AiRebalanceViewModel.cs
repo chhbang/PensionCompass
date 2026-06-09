@@ -9,6 +9,7 @@ using PensionCompass.Core.Ai;
 using PensionCompass.Core.History;
 using PensionCompass.Core.Models;
 using PensionCompass.Core.Pdf;
+using PensionCompass.Core.Reference;
 using PensionCompass.Core.Validation;
 using PensionCompass.Services;
 
@@ -143,6 +144,13 @@ public sealed partial class AiRebalanceViewModel : ObservableObject
     /// If the History screen handed off a "use this as prior" entry, pre-select it here.</summary>
     public void RefreshHistoryEntries()
     {
+        // Reference attachments can change on the 참고 자료 screen → refresh the note when we return here.
+        OnPropertyChanged(nameof(HasAttachedReferences));
+        OnPropertyChanged(nameof(ReferenceAttachmentNote));
+
+        // Pull any history saved on other PCs (Google Drive mode) before listing.
+        AppState.Instance.PullCloudHistoryToLocal();
+
         AvailableHistory.Clear();
         try
         {
@@ -180,7 +188,43 @@ public sealed partial class AiRebalanceViewModel : ObservableObject
             AppState.Instance.Account,
             UserQuery,
             prior,
-            PriorOutcome));
+            PriorOutcome,
+            EnabledReferenceDocs()));
+    }
+
+    // ──────── Reference PDF attachments ────────
+
+    /// <summary>Enabled reference documents (metadata only) for the prompt's "## 참고 자료" section.</summary>
+    private static IReadOnlyList<ReferenceDocument> EnabledReferenceDocs()
+        => AppState.Instance.References.List().Where(d => d.Enabled).ToList();
+
+    public bool HasAttachedReferences => EnabledReferenceDocs().Count > 0;
+
+    public string ReferenceAttachmentNote
+    {
+        get
+        {
+            var docs = EnabledReferenceDocs();
+            if (docs.Count == 0) return string.Empty;
+            var size = docs.Sum(d => d.SizeBytes);
+            return $"참고 자료 {docs.Count}개가 이번 요청에 첨부됩니다 (합계 {ReferenceLibraryViewModel.FormatSize(size)}). 큰 PDF는 응답이 더 오래 걸릴 수 있습니다.";
+        }
+    }
+
+    /// <summary>Loads bytes for enabled references and pairs each with its metadata, dropping any
+    /// whose file went missing so the prompt text and the attached bytes stay in sync.</summary>
+    private static (List<ReferenceDocument> Docs, List<DocumentAttachment> Attachments) LoadEnabledReferences()
+    {
+        var docs = new List<ReferenceDocument>();
+        var attachments = new List<DocumentAttachment>();
+        foreach (var d in AppState.Instance.References.List().Where(d => d.Enabled))
+        {
+            var bytes = AppState.Instance.References.ReadBytes(d.Id);
+            if (bytes is not { Length: > 0 }) continue;
+            docs.Add(d);
+            attachments.Add(new DocumentAttachment(d.FileName, bytes, d.Category));
+        }
+        return (docs, attachments);
     }
 
     public async Task GenerateProposalAsync(CancellationToken cancellationToken = default)
@@ -219,20 +263,23 @@ public sealed partial class AiRebalanceViewModel : ObservableObject
         try
         {
             var resolvedPrior = ResolvePriorSession();
+            var (refDocs, attachments) = LoadEnabledReferences();
             var prompt = PromptBuilder.Build(new PromptInput(
                 AppState.Instance.Catalog,
                 account,
                 UserQuery,
                 resolvedPrior,
-                PriorOutcome));
+                PriorOutcome,
+                refDocs));
 
             var client = AiClientFactory.Create(settings.AiProvider, apiKey, settings.GetActiveModel());
             _lastProviderName = client.ProviderName;
             _lastModelId = client.ModelId;
             _lastThinkingLevel = settings.ThinkingLevel;
-            StatusMessage = $"{client.ProviderName} ({client.ModelId}, 사고 수준: {settings.ThinkingLevel.ToKoreanLabel()}) 호출 중... 응답까지 1~3분 정도 걸릴 수 있습니다.";
+            var attachNote = attachments.Count > 0 ? $" 참고 자료 {attachments.Count}개 첨부." : string.Empty;
+            StatusMessage = $"{client.ProviderName} ({client.ModelId}, 사고 수준: {settings.ThinkingLevel.ToKoreanLabel()}) 호출 중...{attachNote} 응답까지 1~3분 정도 걸릴 수 있습니다.";
 
-            var aiRequest = new AiRequest(prompt.SystemPrompt, prompt.UserPrompt, settings.ThinkingLevel);
+            var aiRequest = new AiRequest(prompt.SystemPrompt, prompt.UserPrompt, settings.ThinkingLevel, attachments);
             var response = await client.GenerateAsync(aiRequest, cancellationToken);
             AiResponse = response;
             ValidationResult = IrpRuleValidator.Validate(response);
@@ -287,8 +334,8 @@ public sealed partial class AiRebalanceViewModel : ObservableObject
 
         try
         {
-            var folder = AppState.Instance.ActiveHistoryFolder;
-            var path = RebalanceHistoryStore.Save(folder, session);
+            // SaveHistory also mirrors to the cloud in Google Drive mode so other PCs see this session.
+            var path = AppState.Instance.SaveHistory(session);
             HasSavedCurrentResponse = true;
             StatusMessage = $"이력에 저장됐습니다: {path}";
             RefreshHistoryEntries();

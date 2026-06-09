@@ -48,6 +48,9 @@ public sealed partial class HistoryViewModel : ObservableObject
 
     public void Refresh()
     {
+        // Bring down any sessions saved on other PCs (Google Drive mode) before listing.
+        AppState.Instance.PullCloudHistoryToLocal();
+
         Entries.Clear();
         try
         {
@@ -151,7 +154,8 @@ public sealed partial class HistoryViewModel : ObservableObject
     public bool DeleteSelected()
     {
         if (SelectedEntry is null) return false;
-        var ok = RebalanceHistoryStore.Delete(SelectedEntry.FilePath);
+        // DeleteHistory removes the cloud copy too (Google Drive mode), else it'd reappear on next pull.
+        var ok = AppState.Instance.DeleteHistory(SelectedEntry.FilePath);
         if (ok)
         {
             Entries.Remove(SelectedEntry);

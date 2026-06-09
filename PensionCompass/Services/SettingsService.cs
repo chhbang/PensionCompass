@@ -1,4 +1,5 @@
 using PensionCompass.Core.Ai;
+using PensionCompass.Core.Sync;
 using Windows.Security.Credentials;
 using Windows.Storage;
 
@@ -70,10 +71,22 @@ public sealed class SettingsService
         MigratePlaintextApiKeysToVault();
     }
 
+    /// <summary>
+    /// Fires when a non-secret preference (provider / model / thinking level) changes via a setter.
+    /// AppState subscribes in Google-connected mode to mirror the change to <c>settings.json</c>.
+    /// Suppressed while <see cref="ApplyPreferences"/> writes downloaded values, to avoid an upload loop.
+    /// </summary>
+    public event EventHandler? PreferencesChanged;
+    private bool _suppressPreferenceEvents;
+    private void RaisePreferencesChanged()
+    {
+        if (!_suppressPreferenceEvents) PreferencesChanged?.Invoke(this, EventArgs.Empty);
+    }
+
     public string AiProvider
     {
         get => _store.Values[AiProviderKey] as string ?? "Claude";
-        set => _store.Values[AiProviderKey] = value;
+        set { _store.Values[AiProviderKey] = value; RaisePreferencesChanged(); }
     }
 
     public string ClaudeApiKey
@@ -177,19 +190,19 @@ public sealed class SettingsService
     public string ClaudeModel
     {
         get => _store.Values[ClaudeModelKey] as string ?? AnthropicClient.DefaultModel;
-        set => _store.Values[ClaudeModelKey] = value;
+        set { _store.Values[ClaudeModelKey] = value; RaisePreferencesChanged(); }
     }
 
     public string GeminiModel
     {
         get => _store.Values[GeminiModelKey] as string ?? GeminiClient.DefaultModel;
-        set => _store.Values[GeminiModelKey] = value;
+        set { _store.Values[GeminiModelKey] = value; RaisePreferencesChanged(); }
     }
 
     public string GptModel
     {
         get => _store.Values[GptModelKey] as string ?? OpenAiClient.DefaultModel;
-        set => _store.Values[GptModelKey] = value;
+        set { _store.Values[GptModelKey] = value; RaisePreferencesChanged(); }
     }
 
     public ThinkingLevel ThinkingLevel
@@ -198,7 +211,34 @@ public sealed class SettingsService
             && Enum.TryParse<ThinkingLevel>(s, out var lvl)
             ? lvl
             : ThinkingLevel.High;
-        set => _store.Values[ThinkingLevelKey] = value.ToString();
+        set { _store.Values[ThinkingLevelKey] = value.ToString(); RaisePreferencesChanged(); }
+    }
+
+    /// <summary>Snapshot of the synced preferences for upload.</summary>
+    public PreferenceSyncService.PreferenceBundle PreferenceSnapshot()
+        => new(AiProvider, ClaudeModel, GeminiModel, GptModel, ThinkingLevel.ToString());
+
+    /// <summary>
+    /// Applies preferences downloaded from the cloud, persisting them to LocalSettings. Suppresses
+    /// <see cref="PreferencesChanged"/> so this download doesn't bounce straight back as an upload.
+    /// Empty fields are ignored so a partial cloud bundle never blanks a local setting.
+    /// </summary>
+    public void ApplyPreferences(PreferenceSyncService.PreferenceBundle bundle)
+    {
+        _suppressPreferenceEvents = true;
+        try
+        {
+            if (!string.IsNullOrEmpty(bundle.AiProvider)) AiProvider = bundle.AiProvider;
+            if (!string.IsNullOrEmpty(bundle.ClaudeModel)) ClaudeModel = bundle.ClaudeModel;
+            if (!string.IsNullOrEmpty(bundle.GeminiModel)) GeminiModel = bundle.GeminiModel;
+            if (!string.IsNullOrEmpty(bundle.GptModel)) GptModel = bundle.GptModel;
+            if (!string.IsNullOrEmpty(bundle.ThinkingLevel) && Enum.TryParse<ThinkingLevel>(bundle.ThinkingLevel, out var lvl))
+                ThinkingLevel = lvl;
+        }
+        finally
+        {
+            _suppressPreferenceEvents = false;
+        }
     }
 
     /// <summary>
